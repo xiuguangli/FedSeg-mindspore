@@ -1,7 +1,6 @@
 import time
 import copy
 import numpy as np
-from tqdm import tqdm
 
 # import torch
 # from torch import nn
@@ -93,6 +92,8 @@ class LocalUpdate(object):
         # trainloader_eval = MultiEpochsDataLoader(DatasetSplit(dataset, idxs_train),
         #                                     num_parallel_workers=self.args.num_workers,
         #                                     shuffle=False).batch(1, drop_remainder=False).repeat(1)
+        
+        self.args.num_workers=1
         trainloader = ds.GeneratorDataset(DatasetSplit(dataset, idxs_train),
                                             # num_parallel_workers=self.args.num_workers,column_names=["image", "label"],
                                             num_parallel_workers=self.args.num_workers,column_names=["image", "label"],
@@ -125,8 +126,7 @@ class LocalUpdate(object):
             if args.model == 'bisenetv2':
                 logits, feat_head, *logits_aux = model(images)
 
-            # _,_,h,w = feat_head.size()
-            _,_,h,w = feat_head.shape
+            _,_,h,w = feat_head.size()
             # labels_2 = F.interpolate(logits.float(),size=(h,w),mode='bilinear')
             labels_2 = ops.interpolate(logits.float(),size=(h,w),mode='bilinear')
             # labels_2 = torch.softmax(labels_2,dim=1)
@@ -157,7 +157,7 @@ class LocalUpdate(object):
             # labels = torch.where(labels.float()!=255,labels.float(),labels_2.float())
             labels = ops.where(labels.float()!=255,labels.float(),labels_2.float())
             # unique_l = torch.unique(labels.cpu()).numpy().tolist()
-            unique_l = ops.unique(labels)[0].numpy().tolist()
+            unique_l = ops.unique(labels.cpu()).numpy().tolist()
             label_list.extend(unique_l)
             # one_hot_ = torch.zeros(args.num_classes).to(self.device)
             one_hot_ = ops.zeros(args.num_classes)
@@ -188,7 +188,6 @@ class LocalUpdate(object):
 
 
     def update_weights(self, model: nn.Cell, global_round,prototypes=None,proto_mask=None):
-        t0 = time.time()
 
         # Set mode to train model
         # model.train()
@@ -243,7 +242,7 @@ class LocalUpdate(object):
                 power=0.9
             )
         }
-        args.lr_scheduler_ = scheduler_dict[args.lr_scheduler]
+        args.lr_scheduler = scheduler_dict[args.lr_scheduler]
         if args.model == 'bisenetv2':
             optimizer:nn.Optimizer = myseg.bisenet_utils.set_optimizer(model, args)
             if args.losstype=='ohem':
@@ -294,168 +293,161 @@ class LocalUpdate(object):
         # }
         # lr_scheduler = scheduler_dict[args.lr_scheduler]
         
-        def forward_fn(images, labels):
-            # images, labels = images.to(self.device), labels.to(self.device)
-            #print(labels.shape) # torch.Size([8, 512, 1024])
 
-            # 计算loss
-            if args.model == 'bisenetv2':
-                logits, feat_head, *logits_aux = model(images)
-                labels_ = labels
-                
-                if args.losstype == 'bce':
-                    # cl_ = torch.arange(args.num_classes)
-                    cl_ = ops.arange(end=args.num_classes)
-                    cl_ = cl_.unsqueeze(0).unsqueeze(2).unsqueeze(2)
-                    # cl_ = cl_.to(labels_.device)
-                    labels_ = labels_.unsqueeze(1) ==cl_
-                    # labels_ = labels_.float()
-                    labels_ = labels_.astype(mindspore.float32)
-                    
-#                    print(logits.size())
-#                    print(labels.size())
-#                    exit()
-                loss_pre = criteria_pre(logits, labels_)
-                loss_aux = [crit(lgt, labels_) for crit, lgt in zip(criteria_aux, logits_aux)]
-                loss = loss_pre + sum(loss_aux)
-            else:
-                exit('Error: unrecognized model')
-            
-            ##########
-            loss_con_2_item = 0
-            if args.is_proto and global_round>= args.proto_start_epoch:
-
-                # _,_,h,w = feat_head.size()
-                _,_,h,w = feat_head.shape
-
-                labels_1 = labels_.unsqueeze(1)
-                # labels_1 = F.interpolate(labels_1.float(),size=(h,w),mode='nearest')
-                labels_1 = ops.interpolate(labels_1.float(),size=(h,w),mode='nearest')
-                labels_1 = labels_1.squeeze(1)
-                #print(feat_head.size())
-                #print(labels_1.size())
-                #print(prototypes.size())
-                #print(proto_mask.size())
-                #exit()
-                if args.kmean_num>0:
-
-                    proto_mask_tmp = proto_mask.sum(1)<1
-                else:
-                    proto_mask_tmp = proto_mask<1
-                for ii, bo in enumerate(proto_mask_tmp):
-                    if bo:
-                        labels_1[labels_1==ii]=255
-
-                loss_con = criteria_contrast(feat_head,labels_1,prototypes,proto_mask)
-                loss_con_item = loss_con.item()
-                loss_ce = loss.item()
-                loss +=args.con_lamb*loss_con 
-                
-                if args.pseudo_label and global_round>=args.pseudo_label_start_epoch:
-                    # device = prototypes.device
-                    # with torch.no_grad():
-                    #     logits_t, feat_head_t, *logits_aux_t = global_model(images)
-                    global_model.set_train(False)
-                    logits_t, feat_head_t, *logits_aux_t = global_model(images)
-                    global_model.set_train(True)
-                    
-                    # labels_2 = F.interpolate(logits_t.float(),size=(h,w),mode='bilinear')
-                    labels_2 = ops.interpolate(logits_t.float(),size=(h,w),mode='bilinear')
-                    # labels_2 = torch.softmax(labels_2,dim=1) 
-                    labels_2 = ops.softmax(labels_2,axis=1) 
-                    # props, labels_2 = torch.max(labels_2,dim=1)
-                    props, labels_2 = ops.max(labels_2,axis=1)
-#                        print(props.max())
-#                        print(props.min())
-
-
-                    mask_ = props<0.8
-                    labels_2[mask_]=255
-            
-
-                    for ii, bo in enumerate(proto_mask_tmp):
-                        if bo:
-                            labels_2[labels_2==ii]=255
-                        
-                    loss_con_2 = criteria_contrast(feat_head,labels_2,prototypes,proto_mask)
-                    # loss_con_2_item = loss_con_2.item()
-                    loss_con_2_item = float(loss_con_2.asnumpy())
-                    loss +=args.con_lamb*loss_con_2
-                    
-####################
-
-
-####################
-
-            else:
-                # loss_ce = loss.item()
-                loss_ce = float(loss.asnumpy())
-                loss_con_item=0
-
-            ########
-            if args.fedprox_mu >0:
-                proximal_term = 0.0
-                # for w, w_t in zip(model.parameters(), global_model.parameters()):
-                #     proximal_term += (w - w_t).norm(2)
-                for w, w_t in zip(model.get_parameters(), global_model.get_parameters()):
-                    proximal_term += float(ops.norm(w - w_t, ord=2))
-                loss += (args.fedprox_mu / 2) * proximal_term
-
-            loss_1_item = 0
-            loss_pi_item=0
-            loss_pa_item=0
-            if args.distill:
-                # loss_1_item = loss.item()
-                loss_1_item = float(loss.asnumpy())
-                # with torch.no_grad():
-                #     logits_t, feat_head_t, *logits_aux_t = global_model(images)                 
-                global_model.set_train(False)
-                logits_t, feat_head_t, *logits_aux_t = global_model(images)                 
-                global_model.set_train(True)
-                
-                if args.distill_lamb_pi>0 and args.is_proto and global_round>= args.proto_start_epoch:
-                    # loss_pi,pixel_seq=criteria_distill_pi(feat_head,feat_head_t.detach(),pixel_seq)
-                    loss_pi, pixel_seq = criteria_distill_pi(feat_head,ops.stop_gradient(feat_head_t),pixel_seq)  # ops.stop_gradient(feat_head_t)等价于 .detach()
-                    loss_pi = args.distill_lamb_pi *loss_pi
-                            
-                    loss+=loss_pi
-                    # loss_pi_item = loss_pi.item()
-                    loss_pi_item = float(loss_pi.asnumpy())
-                else:
-                    loss_pi_item=0
-                if args.distill_lamb_pa>0 and args.is_proto and global_round>= args.proto_start_epoch:
-                    # loss_pa=args.distill_lamb_pa*criteria_distill_pa(feat_head,feat_head_t.detach(),prototypes,proto_mask)
-                    loss_pa=args.distill_lamb_pa*criteria_distill_pa(feat_head,ops.stop_gradient(feat_head_t),prototypes,proto_mask)
-                    loss+=loss_pa
-                    # loss_pa_item = loss_pa.item()
-                    loss_pa_item = float(loss_pa.asnumpy())
-                else:
-                    loss_pa_item=0
-            return loss,loss_ce,loss_1_item,loss_pi_item,loss_pa_item,loss_con_item,loss_con_2_item
-        
         # training
         start_time = time.time()
-        grad_fn = mindspore.value_and_grad(forward_fn, None, optimizer.parameters, has_aux=True)
         for iter in range(args.local_ep):
             batch_loss = []
             # for batch_idx, (images, labels) in enumerate(self.trainloader):
             for batch_idx, (images, labels) in enumerate(self.trainloader_iterator):
-                
-                (loss,loss_ce,loss_1_item,loss_pi_item,loss_pa_item,loss_con_item,loss_con_2_item),grads = grad_fn(images, labels)
-                optimizer(grads)
-                
+                # images, labels = images.to(self.device), labels.to(self.device)
+                #print(labels.shape) # torch.Size([8, 512, 1024])
+
+                # 计算loss
+                if args.model == 'bisenetv2':
+                    
+                    
+                    logits, feat_head, *logits_aux = model(images)
+
+                    
+                    labels_ = labels
+
+                    if args.losstype == 'bce':
+                        # cl_ = torch.arange(args.num_classes)
+                        cl_ = ops.arange(end=args.num_classes)
+                        cl_ = cl_.unsqueeze(0).unsqueeze(2).unsqueeze(2)
+                        # cl_ = cl_.to(labels_.device)
+                        labels_ = labels_.unsqueeze(1) ==cl_
+                        # labels_ = labels_.float()
+                        labels_ = labels_.astype(mindspore.float32)
+                        
+#                    print(logits.size())
+#                    print(labels.size())
+#                    exit()
+                    loss_pre = criteria_pre(logits, labels_)
+                    loss_aux = [crit(lgt, labels_) for crit, lgt in zip(criteria_aux, logits_aux)]
+                    loss = loss_pre + sum(loss_aux)
+                else:
+                    exit('Error: unrecognized model')
+
+                ##########
+                if args.is_proto and global_round>= args.proto_start_epoch:
+
+                    _,_,h,w = feat_head.size()
+
+                    labels_1 = labels_.unsqueeze(1)
+                    # labels_1 = F.interpolate(labels_1.float(),size=(h,w),mode='nearest')
+                    labels_1 = ops.interpolate(labels_1.float(),size=(h,w),mode='nearest')
+                    labels_1 = labels_1.squeeze(1)
+                    #print(feat_head.size())
+                    #print(labels_1.size())
+                    #print(prototypes.size())
+                    #print(proto_mask.size())
+                    #exit()
+                    if args.kmean_num>0:
+
+                        proto_mask_tmp = proto_mask.sum(1)<1
+                    else:
+                        proto_mask_tmp = proto_mask<1
+                    for ii, bo in enumerate(proto_mask_tmp):
+                        if bo:
+                            labels_1[labels_1==ii]=255
+
+                    loss_con = criteria_contrast(feat_head,labels_1,prototypes,proto_mask)
+                    loss_con_item = loss_con.item()
+                    loss_ce = loss.item()
+                    loss +=args.con_lamb*loss_con 
+                    
+                    if args.pseudo_label and global_round>=args.pseudo_label_start_epoch:
+                        # device = prototypes.device
+                        # with torch.no_grad():
+                        #     logits_t, feat_head_t, *logits_aux_t = global_model(images)
+                        global_model.set_train(False)
+                        logits_t, feat_head_t, *logits_aux_t = global_model(images)
+                        global_model.set_train(True)
+                        
+                        # labels_2 = F.interpolate(logits_t.float(),size=(h,w),mode='bilinear')
+                        labels_2 = ops.interpolate(logits_t.float(),size=(h,w),mode='bilinear')
+                        # labels_2 = torch.softmax(labels_2,dim=1) 
+                        labels_2 = ops.softmax(labels_2,axis=1) 
+                        # props, labels_2 = torch.max(labels_2,dim=1)
+                        props, labels_2 = ops.max(labels_2,axis=1)
+#                        print(props.max())
+#                        print(props.min())
+
+
+                        mask_ = props<0.8
+                        labels_2[mask_]=255
+             
+
+                        for ii, bo in enumerate(proto_mask_tmp):
+                            if bo:
+                                labels_2[labels_2==ii]=255
+                            
+                        loss_con_2 = criteria_contrast(feat_head,labels_2,prototypes,proto_mask)
+                        # loss_con_2_item = loss_con_2.item()
+                        loss_con_2_item = float(loss_con_2.asnumpy())
+                        loss +=args.con_lamb*loss_con_2
+                        
+####################
+
+
+####################
+
+                else:
+                    # loss_ce = loss.item()
+                    loss_ce = float(loss.asnumpy())
+                    loss_con_item=0
+
+                ########
+                if args.fedprox_mu >0:
+                    proximal_term = 0.0
+                    # for w, w_t in zip(model.parameters(), global_model.parameters()):
+                    #     proximal_term += (w - w_t).norm(2)
+                    for w, w_t in zip(model.get_parameters(), global_model.get_parameters()):
+                        proximal_term += float(ops.norm(w - w_t, ord=2))
+                    loss += (args.fedprox_mu / 2) * proximal_term
+
+                if args.distill:
+                    # loss_1_item = loss.item()
+                    loss_1_item = float(loss.asnumpy())
+                    # with torch.no_grad():
+                    #     logits_t, feat_head_t, *logits_aux_t = global_model(images)                 
+                    global_model.set_train(False)
+                    logits_t, feat_head_t, *logits_aux_t = global_model(images)                 
+                    global_model.set_train(True)
+                    
+                    if args.distill_lamb_pi>0 and args.is_proto and global_round>= args.proto_start_epoch:
+                        # loss_pi,pixel_seq=criteria_distill_pi(feat_head,feat_head_t.detach(),pixel_seq)
+                        loss_pi, pixel_seq = criteria_distill_pi(feat_head,ops.stop_gradient(feat_head_t),pixel_seq)  # ops.stop_gradient(feat_head_t)等价于 .detach()
+                        loss_pi = args.distill_lamb_pi *loss_pi
+                               
+                        loss+=loss_pi
+                        # loss_pi_item = loss_pi.item()
+                        loss_pi_item = float(loss_pi.asnumpy())
+                    else:
+                        loss_pi_item=0
+                    if args.distill_lamb_pa>0 and args.is_proto and global_round>= args.proto_start_epoch:
+                        # loss_pa=args.distill_lamb_pa*criteria_distill_pa(feat_head,feat_head_t.detach(),prototypes,proto_mask)
+                        loss_pa=args.distill_lamb_pa*criteria_distill_pa(feat_head,ops.stop_gradient(feat_head_t),prototypes,proto_mask)
+                        loss+=loss_pa
+                        # loss_pa_item = loss_pa.item()
+                        loss_pa_item = float(loss_pa.asnumpy())
+                    else:
+                        loss_pa_item=0
+
+
                 # batch_loss.append(loss.item())
                 batch_loss.append(float(loss.asnumpy()))
-                # break
                 # optimizer.zero_grad()
                 # loss.backward()
                 # optimizer.step()  # update params
+                grads = ops.grad(loss, model.trainable_params())
+                optimizer(grads)
 
                 # 打印学习率
                 # print("Local Epoch: {}, batch_idx: {}, lr: {:.3e}".format(iter, batch_idx, lr_scheduler.get_lr()[0]))
-                # print(optimizer.get_lr())
-                # exit()
-                # print("Local Epoch: {}, batch_idx: {}, lr: {:.3e}".format(iter, batch_idx, optimizer.get_lr()[iter]))
+                print("Local Epoch: {}, batch_idx: {}, lr: {:.3e}".format(iter, batch_idx, optimizer.get_lr()))
                 # lr_scheduler.step() # lr_scheduler:poly,根据iter(每个batch)更新lr, (不是根据local_epoch更新)
 
             epoch_loss.append(sum(batch_loss)/len(batch_loss))

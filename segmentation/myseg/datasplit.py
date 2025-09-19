@@ -1,8 +1,10 @@
 import os
 import time
 import numpy as np
-import torch
-from torchvision import datasets, transforms
+# import torch
+# from torchvision import datasets, transforms
+
+
 from myseg.dataloader import *
 from myseg.dataloader_camvid import CamVid_Dataset
 from myseg.tv_transform import get_transform

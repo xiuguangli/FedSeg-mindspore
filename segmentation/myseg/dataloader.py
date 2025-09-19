@@ -2,12 +2,15 @@ import os
 
 import cv2
 import numpy as np
-import torch
-import torchvision
-import torch.distributed as dist
+# import torch
+# import torchvision
+# import torch.distributed as dist
 from collections import OrderedDict
 import myseg.tv_transform as my_transforms
 import myseg.cv2_transform as cv2_transforms
+
+import mindspore.dataset as ds
+from mindspore.communication import init, get_rank, get_group_size
 
 # 数据集根路径
 # root_dir = '../data/cityscapes'
@@ -45,7 +48,8 @@ def read_images_dir(root_dir, folder, is_label=False):
 
 
 
-class Cityscapes_Dataset(torch.utils.data.Dataset):
+# class Cityscapes_Dataset(torch.utils.data.Dataset):
+class Cityscapes_Dataset():
     """Cityscapes dataset"""
 
     # Training dataset root folders
@@ -175,20 +179,23 @@ def load_dataiter(root_dir, batch_size, use_DDP=False):
     train_set = Cityscapes_Dataset(root_dir, 'train')
     test_set = Cityscapes_Dataset(root_dir, 'val')
 
-    if use_DDP:
-        # DDP：使用DistributedSampler，DDP帮我们把细节都封装起来了。
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
-        # test_sampler = torch.utils.data.distributed.DistributedSampler(test_set)
+    # if use_DDP:
+    #     # DDP：使用DistributedSampler，DDP帮我们把细节都封装起来了。
+    #     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
+    #     # test_sampler = torch.utils.data.distributed.DistributedSampler(test_set)
 
-        train_iter = torch.utils.data.DataLoader(
-            train_set, batch_size, shuffle=False, drop_last=True, num_workers=num_workers, sampler=train_sampler)
-        test_iter = torch.utils.data.DataLoader(
-            test_set, batch_size, drop_last=True, num_workers=num_workers)
-    else:
-        train_iter = torch.utils.data.DataLoader(
-            train_set, batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
-        test_iter = torch.utils.data.DataLoader(
-            test_set, batch_size, drop_last=True, num_workers=num_workers)
+    #     train_iter = torch.utils.data.DataLoader(
+    #         train_set, batch_size, shuffle=False, drop_last=True, num_workers=num_workers, sampler=train_sampler)
+    #     test_iter = torch.utils.data.DataLoader(
+    #         test_set, batch_size, drop_last=True, num_workers=num_workers)
+    # else:
+    #     train_iter = torch.utils.data.DataLoader(
+    #         train_set, batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
+    #     test_iter = torch.utils.data.DataLoader(
+    #         test_set, batch_size, drop_last=True, num_workers=num_workers)
+    
+    train_iter = ds.GeneratorDataset(train_set, shuffle=True,column_names=["image", "label"], num_parallel_workers=num_workers).batch(batch_size=batch_size,drop_remainder=True)
+    test_iter = ds.GeneratorDataset(test_set, column_names=["image", "label"],num_parallel_workers=num_workers).batch(batch_size=batch_size,drop_remainder=True)
 
     return train_iter, test_iter
 

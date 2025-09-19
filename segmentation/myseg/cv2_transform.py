@@ -2,15 +2,26 @@ import random
 import math
 import numpy as np
 import cv2
-import torch
-from torchvision.transforms import Compose
+# import torch
+# from torchvision.transforms import Compose
 
+import mindspore as  ms
+from mindspore import Tensor
+# from mindspore.dataset.transforms import Compose
 
 def cv2_get_image(impth, lbpth):
     image = cv2.imread(impth)[:, :, ::-1].copy()
     label = cv2.imread(lbpth, 0)
     return image, label
 
+class Compose:
+    def __init__(self, transforms:list):
+        self.transforms = transforms
+    
+    def __call__(self, img):
+        for t in self.transforms:
+            img = t(img)
+        return img
 
 class TransformationTrain(object):
     """
@@ -98,7 +109,7 @@ class RandomHorizontalFlip(object):
             lb=lb[:, ::-1],
         )
 
-class ToTensor(object):
+class ToTensor0(object):
     '''
     mean and std should be of the channel order 'bgr'
     '''
@@ -118,3 +129,52 @@ class ToTensor(object):
         if not lb is None:
             lb = torch.from_numpy(lb.astype(np.int64).copy()).clone()
         return dict(im=im, lb=lb)
+    
+class ToTensor(object):
+    '''
+    mean and std should be of the channel order 'bgr'
+    '''
+
+    def __init__(self, mean=(0, 0, 0), std=(1., 1., 1.)):
+        # self.mean = mean
+        # self.std = std
+        self.mean = np.array(mean, dtype=np.float32).reshape(3, 1, 1)
+        self.std = np.array(std, dtype=np.float32).reshape(3, 1, 1)
+
+    def __call__0(self, im_lb):
+        # mindspore 中 clone 方法好像会出问题，不知掉是不是因为 nvidia 的问题。
+        im, lb = im_lb['im'], im_lb['lb']
+        im = im.transpose(2, 0, 1).astype(np.float32)
+        # MindSpore 中使用 mindspore.Tensor 从 numpy 数组创建张量
+        # MindSpore 不推荐使用原地（in-place）操作，因此将 .div_() 更改为标准的除法运算
+        im = Tensor(im) / 255.0
+        dtype = ms.float32
+        
+        # MindSpore 的张量没有 .device 属性，设备上下文是全局管理的
+        # 使用 mindspore.Tensor 创建张量
+        mean = Tensor(self.mean, dtype=dtype)[:, None, None]
+        std = Tensor(self.std, dtype=dtype)[:, None, None]
+        
+        # 将 .sub_().div_() 链式操作替换为标准的减法和除法运算
+        # .clone() 对应 mindspore.Tensor.clone()
+        im = ((im - mean) / std)
+
+        if  lb is not None:
+            # 使用 mindspore.Tensor 从 numpy 数组创建张量，并指定数据类型
+            lb = Tensor(lb.astype(np.int64), dtype=ms.int64)
+        return dict(im=im, lb=lb)
+    
+    def __call__(self, im_lb):
+        im, lb = im_lb['im'], im_lb['lb']
+        
+        # Transpose and convert to float32
+        im = im.transpose(2, 0, 1).astype(np.float32)
+        
+        # Normalize using numpy
+        im = (im / 255.0 - self.mean) / self.std
+
+        if lb is not None:
+            lb = lb.astype(np.int64)
+            
+        return dict(im=im, lb=lb)
+    

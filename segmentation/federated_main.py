@@ -1,33 +1,40 @@
 import os
+os.environ['GLOG_v'] = '3'
 import copy
+import json
 import time
 import pickle
 #import wandb
-import torch.nn.functional as F
+# import torch.nn.functional as F
+# import mindspore.mint.nn.functional as F
+import mindspore.ops as F
+
 import numpy as np
-from torch import nn
+# from torch import nn
 from tqdm import tqdm
 
-import torch
-from torch.utils.data import DataLoader
+# import torch
+import mindspore
+import mindspore.nn as nn
+# from torch.utils.data import DataLoader
+
+from mindspore.dataset import GeneratorDataset
 
 from options import args_parser
 from update import LocalUpdate, test_inference
 from utils import average_weights, weighted_average_weights, exp_details,EMA
-from eval_utils import evaluate
-
-
-from sklearn.cluster import KMeans
-from scipy.optimize  import linear_sum_assignment
-
 from myseg.datasplit import get_dataset_cityscapes,get_dataset_camvid,get_dataset_ade20k
 from myseg.bisenet_utils import set_model_bisenetv2
+
+
+# from sklearn.cluster import KMeans
+# from scipy.optimize  import linear_sum_assignment
+
 
 import warnings
 warnings.filterwarnings("ignore") # 忽略warning
 
 print('os.getcwd(): ', os.getcwd())
-
 
 
 def make_model(args):
@@ -78,16 +85,23 @@ def init_wandb(args, wandb_id, project_name='myseg'):
 
 
 if __name__ == '__main__':
+    import random
     args = args_parser()
 
     start_time = time.time()
     exp_details(args)
 
-    torch.cuda.set_device(int(args.gpu))
+    # torch.cuda.set_device(int(args.gpu))
+    mindspore.set_device(device_target="GPU", device_id=int(args.gpu)) 
 
-    torch.manual_seed(args.seed)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print('device: ' + device)
+    mindspore.set_seed(args.seed)
+    # mindspore.dataset.config.set_multiprocessing_timeout_interval(10)
+    if not mindspore.device_context.gpu.is_available():
+        print("not find GPU, finished!")
+        import sys
+        sys.exit()
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # print('device: ' + device)
 
     # load dataset and user groups
     if args.dataset == 'cityscapes':
@@ -101,10 +115,11 @@ if __name__ == '__main__':
     else:
         exit('Error: unrecognized dataset')
 
-    test_loader = DataLoader(test_dataset, batch_size=1, num_workers=args.num_workers, shuffle=False, pin_memory=True) # for global model test
+    # test_loader = DataLoader(test_dataset, batch_size=1, num_workers=args.num_workers, shuffle=False, pin_memory=True) # for global model test
+    test_loader = GeneratorDataset(source=test_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=False).batch(batch_size=1)
 
     # BUILD MODEL
-    global_model = make_model(args)
+    global_model: nn.Cell = make_model(args)
 
     # print global_model
     # from torchinfo import summary
@@ -113,27 +128,29 @@ if __name__ == '__main__':
     # exit()
 
     # Set the model to train and send it to device.
-    global_model.to(device)
-    global_model.train()
+    # global_model.to(device)
+    # global_model.train()
+    global_model.set_train()
 
     # copy weights
     global_weights = global_model.state_dict()
 
     # resume from checkpoint
     #args.checkpoint = "fed_train_bisenetv2_c19_e1500_frac[0.035]_iid[1]_E[2]_B[8]_lr[0.05]_acti[relu]_users[144]_opti[sgd]_sche[lambda].pth"
-    if args.checkpoint != "":
-        checkpoint = torch.load(
-            os.path.join(args.root, 'save/checkpoints', args.checkpoint),
-            map_location=device)
-        global_model.load_state_dict(checkpoint['model'])
-        start_ep = checkpoint['epoch'] + 1
-        wandb_id = checkpoint['wandb_id']
-        print("resume from: ", args.checkpoint)
-    else:
-        # a new run
-        start_ep = 0
-        wandb_id = None
-
+    # if args.checkpoint != "":
+    #     # checkpoint = torch.load(os.path.join(args.root, 'save/checkpoints', args.checkpoint),map_location=device)
+    #     checkpoint = mindspore.load_checkpoint(os.path.join(args.root, 'save/checkpoints', args.checkpoint))
+    #     global_model.load_state_dict(checkpoint['model'])
+    #     start_ep = checkpoint['epoch'] + 1
+    #     wandb_id = checkpoint['wandb_id']
+    #     print("resume from: ", args.checkpoint)
+    # else:
+    #     # a new run
+    #     start_ep = 0
+    #     wandb_id = None
+    start_ep = 0
+    wandb_id = None
+    
 
     # wandb可视化 init
     if args.USE_WANDB:
@@ -175,7 +192,9 @@ if __name__ == '__main__':
 
     IoU_record =[]
     Acc_record = []
-    for epoch in range(start_ep, args.epochs):
+    time_list = []
+    for epoch in tqdm(range(start_ep, args.epochs),desc="Global Epoch"):
+        t0 = time.time()
         local_weights, local_losses = [], []
         client_dataset_len = [] # for non-IID weighted_average_weights
         print('\n\n| Global Training Round : {} |'.format(epoch))
@@ -183,7 +202,8 @@ if __name__ == '__main__':
         if args.globalema:
             ema.apply_shadow()
             global_model = ema.model
-        global_model.train()
+        # global_model.train()
+        global_model.set_train()
         # m = max(int(args.frac * args.num_users), 1)
         # idxs_users = np.random.choice(range(args.num_users), m, replace=False)
         idxs_users = np.random.choice(range(args.num_users), int(args.frac_num), replace=False) # 直接指定frac_num个local user
@@ -256,10 +276,11 @@ if __name__ == '__main__':
 #            print('Extracting prototypes finished')
 
         print('local update')
+
         for idx in idxs_users:
 
             print('\nUser idx : ' + str(idx))
-
+            
             local_model = LocalUpdate(args=args, dataset=train_dataset,
                                       idxs=user_groups[idx])
 
@@ -277,11 +298,13 @@ if __name__ == '__main__':
                                                      global_round=epoch)
 
                     if args.kmean_num>0:
-                        proto_tmp = F.normalize(proto_tmp,dim=2)
+                        # proto_tmp = F.normalize(proto_tmp,dim=2)
+                        proto_tmp = F.L2Normalize(axis=2)(proto_tmp)
                     
                     else:
                         proto_tmp = proto_tmp.mean(0)
-                        proto_tmp = F.normalize(proto_tmp,dim=1)
+                        # proto_tmp = F.normalize(proto_tmp,dim=1)
+                        proto_tmp = F.L2Normalize(axis=1)(proto_tmp)
                         label_mask_ = label_mask_.sum(0)>0
 
 
@@ -292,9 +315,28 @@ if __name__ == '__main__':
                 else:
                     local_mem = None
                     local_mask = None
-            w, loss = local_model.update_weights(model=copy.deepcopy(global_model),
-                                                global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
+            # 1. 定义一个临时的 checkpoint 文件路径
+            #    使用 os.getpid() 可以确保在多进程环境下文件名不冲突
+            
+            tmp_ckpt_path = f'./tmp_global_model_{os.getpid()}.ckpt'
+            # 2. 将全局模型的参数保存到这个临时文件
+            mindspore.save_checkpoint(global_model, tmp_ckpt_path)
 
+            # 3. 创建一个新的、干净的模型实例
+            #    它的结构必须和 global_model 完全一样
+            local_model_instance =set_model_bisenetv2(args=args,num_classes=args.num_classes) # 确保这里的参数正确
+
+            # 4. 从临时文件中加载参数到新实例中
+            param_dict = mindspore.load_checkpoint(tmp_ckpt_path)
+            mindspore.load_param_into_net(local_model_instance, param_dict)
+
+            # 5. (可选但推荐) 删除临时文件
+            os.remove(tmp_ckpt_path)
+            
+            # w, loss = local_model.update_weights(model=copy.deepcopy(global_model),
+            #                                     global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
+            w, loss = local_model.update_weights(model=local_model_instance,
+                                                global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
             local_weights.append(copy.deepcopy(w))
             local_losses.append(copy.deepcopy(loss))
             client_dataset_len.append(len(user_groups[idx])) # for non-IID weighted_average_weights
@@ -302,7 +344,8 @@ if __name__ == '__main__':
             #print('create LocalUpdate time: {:.2f}s'.format(LocalUpdate_time))
             #print('update_weights time: {:.2f}s'.format(update_weights_time))
             #print("Time per user: {:.2f}s".format(time.time() - time_per_user))
-
+            # break
+        
         loss_avg = sum(local_losses) / len(local_losses)
         train_loss.append(loss_avg)
         print('\n| Global Training Round {} Summary |'.format(epoch))
@@ -336,22 +379,37 @@ if __name__ == '__main__':
 
         # save global model to checkpoint                 
         if (epoch+1) % args.save_frequency == 0 or epoch == args.epochs-1:
-            torch.save(
-                {
-                    'model': global_model.state_dict(),
-                    'epoch': epoch,
-                    'exp_name': exp_name,
-                    'wandb_id': wandb_id
-                },
-                os.path.join(args.root, 'save/checkpoints', exp_name+'.pth')
-            )
+            # torch.save(
+            #     {
+            #         'model': global_model.state_dict(),
+            #         'epoch': epoch,
+            #         'exp_name': exp_name,
+            #         'wandb_id': wandb_id
+            #     },
+            #     os.path.join(args.root, 'save/checkpoints', exp_name+'.pth')
+            # )
+            save_dir = os.path.join(args.root, 'save/checkpoints')
+            os.makedirs(save_dir, exist_ok=True)
+            checkpoint_path = os.path.join(save_dir, exp_name + '.ckpt') # MindSpore 推荐使用 .ckpt 后缀
+            metadata_path = os.path.join(save_dir, exp_name + '_meta.json')
+            # --- 1. 保存模型参数 ---
+            mindspore.save_checkpoint(global_model, checkpoint_path)
+            metadata = {
+                'epoch': epoch,
+                'exp_name': exp_name,
+                'wandb_id': wandb_id
+            }
+            # --- 2. 保存元数据 ---
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=4)
             print('\nGlobal model weights save to checkpoint')
         # torch.save(weights, 'weights.pt')# comment off for checking weights update
 
 
         # ----------------------------下面的全是evaluate部分----------------------------
-        global_model.eval()
 
+        # global_model.eval()
+        global_model.set_train(False)
         # origin : Calculate avg test accuracy over train data of a fraction of users at every epoch
         # my code : Calculate avg accuracy over LOCAL train data of users in [idxs_users] trained already at every 'local_test_frequency' epoch
         #           print global training loss on train set after every 'local_test_frequency' rounds
@@ -392,7 +450,9 @@ if __name__ == '__main__':
         if not args.train_only and (epoch+1) % args.global_test_frequency == 0:
             print('\n*******************************************') # use * to mark the Evaluation of GLOBAL model on TEST dataset
             print('Evaluate global model on global Test dataset')
+            t1 = time.time()
             test_acc, test_iou, confmat = test_inference(args, global_model, test_loader)
+            print(f"Test inference time: {time.time()-t1:.2f}s")
             print(confmat)
             print('\nResults after {} global rounds of training:'.format(epoch+1))
             print("|---- Global Test Accuracy: {:.2f}%".format(test_acc))
@@ -414,6 +474,9 @@ if __name__ == '__main__':
             print('\nwandb commit at epoch {}'.format(epoch+1))
         except:
             print('\nwandb not init')
+        epoch_time = time.time() - t0
+        time_list.append(epoch_time)
+        print('| End of epoch {:3d} | Time: {:.2f}s ({:.2f}min) |'.format(epoch, epoch_time, epoch_time/60))
 
     print('@'*100)
     print('Average Results of final 5 epochs')

@@ -5,7 +5,8 @@ date_now=$(date +"%Y%m%d_%H%M%S")
 #ROOT_DIR='../data/cityscapes'
 #ROOT_DIR='../data/cityscapes_split_erase19'
 #ROOT_DIR='../data/cityscapes_split_erase19C2'
-ROOT_DIR='../voc'
+# ROOT_DIR='../voc'
+ROOT_DIR='./data/voc'
 #ROOT_DIR='../data/ade20k_erase_150C1'
 
 LABEL_ONLINE_GEN=False
@@ -47,7 +48,7 @@ NUM_CLS=20
 NUM_USERS=60
 
 python -u segmentation/federated_main.py \
---gpu="0" \
+--gpu="2" \
 --dataset=$DATASET \
 --root_dir=$ROOT_DIR \
 --USE_ERASE_DATA=True \

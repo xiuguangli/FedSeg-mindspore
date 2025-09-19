@@ -5,9 +5,9 @@ date_now=$(date +"%Y%m%d_%H%M%S")
 #ROOT_DIR='../data/cityscapes'
 #ROOT_DIR='../data/cityscapes_split_erase19'
 #ROOT_DIR='../data/cityscapes_split_erase19C2'
-#ROOT_DIR='../voc'
-# ROOT_DIR='../ade20k_split_class_2'
-ROOT_DIR='/home/lxg/work/Dataset/ade20k_split_class'
+# ROOT_DIR='../voc'
+ROOT_DIR='./data/voc'
+#ROOT_DIR='../data/ade20k_erase_150C1'
 
 LABEL_ONLINE_GEN=False
 LOSSTYPE=back #ce,ohem,back,'dice','focal','lovasz','bce'
@@ -33,10 +33,10 @@ MOM_UPDATE=False
 
 GLOBALEMA=False
 PROTO_START_EPOCH=1
-CON_LAMB=1
+CON_LAMB=0.1
 MOMENTUM=0.99
 TEMP=0.07
-EPOCH_NUM=800
+EPOCH_NUM=1200
 MAX_ANCHOR=4096
 KMEAN_NUM=2
 PSEUDO_LABLE=True
@@ -45,11 +45,12 @@ LOCALMEM=True
 CON_LAMB_LOCAL=1
 
 ##################
-DATASET=ade20k #cityscapes #ade20k  #camvid
-NUM_CLS=150
-NUM_USERS=450
+DATASET=voc #cityscapes #ade20k  #camvid
+NUM_CLS=20
+NUM_USERS=60
 
-python -u segmentation/federated_main.py \
+# python -u segmentation/federated_main.py \
+python -u transform_model_weight.py \
 --gpu="2" \
 --dataset=$DATASET \
 --root_dir=$ROOT_DIR \
@@ -98,4 +99,3 @@ python -u segmentation/federated_main.py \
 | tee -a "save/logs/log-${date_now}.txt"
 
 
-# --global_test_frequency=20 \

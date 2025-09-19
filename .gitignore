@@ -1,0 +1,6 @@
+venv/*
+save/*
+logs/*
+data/*
+*.pyc
+__pycache__/

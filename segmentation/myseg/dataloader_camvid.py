@@ -2,13 +2,18 @@ import os
 
 import cv2
 import numpy as np
-import torch
-import torchvision
-import torch.distributed as dist
+# import torch
+# import torchvision
+# import torch.distributed as dist
 from collections import OrderedDict
 import myseg.tv_transform as my_transforms
 import myseg.cv2_transform as cv2_transforms
 from PIL import Image
+
+import mindspore
+import mindspore.nn as nn
+import mindspore.ops as ops
+import mindspore.dataset as ds
 
 
 # 数据集根路径
@@ -59,7 +64,8 @@ def read_images_dir(root_dir, folder, is_label=False):
 
 
 
-class CamVid_Dataset(torch.utils.data.Dataset):
+# class CamVid_Dataset(torch.utils.data.Dataset):
+class CamVid_Dataset():
     """Cityscapes dataset"""
 
     # Training dataset root folders
@@ -94,8 +100,6 @@ class CamVid_Dataset(torch.utils.data.Dataset):
 
 
     def __getitem__(self, idx):
-
-
         # 读入图片
         if self.args.dataset=='voc':
             image = Image.open(self.image_dirs[idx])
@@ -112,7 +116,7 @@ class CamVid_Dataset(torch.utils.data.Dataset):
         #label = self.lb_map[label]
         if self.args.dataset=='camvid':
 
-            if self.split == 'val':  
+            if self.split == 'val':
                 label = np.uint8(label)-1
         elif self.args.dataset=='ade20k':
             label = np.uint8(label)-1
@@ -124,7 +128,7 @@ class CamVid_Dataset(torch.utils.data.Dataset):
             scale_ = 480
 
 
-        # transform : 同时处理image和label
+        # transform : 同时处理image和label        
         image_label = dict(im=image, lb=label)
 
         if self.split == 'train':
@@ -133,15 +137,16 @@ class CamVid_Dataset(torch.utils.data.Dataset):
         if self.split == 'val':
             image_label = cv2_transforms.TransformationVal()(image_label)
 
+        
         # ToTensor
         image_label = cv2_transforms.ToTensor(
             mean=(0.3257, 0.3690, 0.3223),  # city, rgb
             std=(0.2112, 0.2148, 0.2115),
         )(image_label)
-
         image, label = image_label['im'], image_label['lb']
+        
+        # print(11111)
         # print(image.shape, label.shape) # torch.Size([3, 512, 1024]) torch.Size([512, 1024])
-
         return (image, label)
 
     def __len__(self):
@@ -156,21 +161,25 @@ def load_dataiter(root_dir, batch_size, use_DDP=False):
     train_set = CamVid_Dataset(root_dir, 'train')
     test_set = CamVid_Dataset(root_dir, 'val')
 
-    if use_DDP:
-        # DDP：使用DistributedSampler，DDP帮我们把细节都封装起来了。
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
-        # test_sampler = torch.utils.data.distributed.DistributedSampler(test_set)
+    # if use_DDP:
+    #     # DDP：使用DistributedSampler，DDP帮我们把细节都封装起来了。
+    #     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
+    #     # test_sampler = torch.utils.data.distributed.DistributedSampler(test_set)
 
-        train_iter = torch.utils.data.DataLoader(
-            train_set, batch_size, shuffle=False, drop_last=True, num_workers=num_workers, sampler=train_sampler)
-        test_iter = torch.utils.data.DataLoader(
-            test_set, batch_size, drop_last=True, num_workers=num_workers)
-    else:
-        train_iter = torch.utils.data.DataLoader(
-            train_set, batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
-        test_iter = torch.utils.data.DataLoader(
-            test_set, batch_size, drop_last=True, num_workers=num_workers)
+    #     train_iter = torch.utils.data.DataLoader(
+    #         train_set, batch_size, shuffle=False, drop_last=True, num_workers=num_workers, sampler=train_sampler)
+    #     test_iter = torch.utils.data.DataLoader(
+    #         test_set, batch_size, drop_last=True, num_workers=num_workers)
+    # else:
+    #     train_iter = torch.utils.data.DataLoader(
+    #         train_set, batch_size, shuffle=True, drop_last=True, num_workers=num_workers)
+    #     test_iter = torch.utils.data.DataLoader(
+    #         test_set, batch_size, drop_last=True, num_workers=num_workers)
 
+    
+    train_iter = ds.GeneratorDataset(train_set,column_names=["image", "label"], shuffle=True, num_parallel_workers=num_workers).batch(batch_size=batch_size,drop_remainder=True)
+    test_iter = ds.GeneratorDataset(test_set,column_names=["image", "label"], num_parallel_workers=num_workers).batch(batch_size=batch_size,drop_remainder=True)
+    
     return train_iter, test_iter
 
 

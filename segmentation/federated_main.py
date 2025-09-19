@@ -450,9 +450,7 @@ if __name__ == '__main__':
         if not args.train_only and (epoch+1) % args.global_test_frequency == 0:
             print('\n*******************************************') # use * to mark the Evaluation of GLOBAL model on TEST dataset
             print('Evaluate global model on global Test dataset')
-            t1 = time.time()
             test_acc, test_iou, confmat = test_inference(args, global_model, test_loader)
-            print(f"Test inference time: {time.time()-t1:.2f}s")
             print(confmat)
             print('\nResults after {} global rounds of training:'.format(epoch+1))
             print("|---- Global Test Accuracy: {:.2f}%".format(test_acc))

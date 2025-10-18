@@ -107,11 +107,12 @@ def set_optimizer(model, args):
             {'params': wd_params},
             {'params': non_wd_params, 'weight_decay': 0},
         ]
-
     # 使用 mindspore.nn.SGD
     optim = nn.SGD(
-        params_list,
-        learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
+        # params_list,
+        model.trainable_params(),  # 如果参数分组有问题，可以直接传入所有可训练参数
+        # learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
+        learning_rate=args.lr,  # 参数名从 lr 变为 learning_rate
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )
@@ -598,7 +599,10 @@ class ContrastLoss(nn.Cell):
     # def forward(self,embs,labels,proto_mem,proto_mask):
     def construct(self,embs,labels,proto_mem,proto_mask):
         # device = proto_mem.device
+        
         anchors,anchor_labels = self._anchor_sampling(embs,labels)
+        
+        
         if anchors is None:
             # loss =torch.tensor(0).to(device)
             loss =ms.tensor(0)
@@ -648,15 +652,18 @@ class ContrastLoss(nn.Cell):
             proto_labels = proto_labels[sel_idx]
             # proto_labels =proto_labels.to(device)
 
+
 #        print(proto_mem_.size())
 #        print(proto_labels.size())
 #        exit()
         # anchor_dot_contrast = torch.div(torch.matmul(anchors,proto_mem_.T),self.temperature)
+        
         anchor_dot_contrast = ops.div(ops.matmul(anchors,proto_mem_.T),self.temperature)
         mask = anchor_labels.unsqueeze(1)==proto_labels.unsqueeze(0)
         mask = mask.float()
         # mask = mask.to(device)
-
+        
+        
         # logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
         logits_max, _ = ops.max(anchor_dot_contrast, axis=1, keepdims=True)
 
@@ -686,7 +693,7 @@ class ContrastLoss(nn.Cell):
         log_prob = logits - ops.log(exp_logits + neg_logits)
 
         mean_log_prob_pos = (mask * log_prob).sum(1) / mask.sum(1)
-
+        
         loss = - mean_log_prob_pos
         loss = loss.mean()
         # if torch.isnan(loss):
@@ -714,6 +721,7 @@ class ContrastLoss(nn.Cell):
             exit()
 #        print(loss)
 #        print('*'*10)
+        
         return loss
 
 

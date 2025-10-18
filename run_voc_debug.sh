@@ -46,8 +46,9 @@ DATASET=voc #cityscapes #ade20k  #camvid
 NUM_CLS=20
 NUM_USERS=60
 
+# kernprof -l -v segmentation/federated_main.py \
 python -u segmentation/federated_main.py \
---gpu="0" \
+--gpu="1" \
 --dataset=$DATASET \
 --root_dir=$ROOT_DIR \
 --USE_ERASE_DATA=True \
@@ -89,7 +90,7 @@ python -u segmentation/federated_main.py \
 --mom_update=$MOM_UPDATE \
 --save_frequency=20 \
 --local_test_frequency=9999 \
---global_test_frequency=20 \
+--global_test_frequency=1 \
 --USE_WANDB=0 \
 --date_now=${date_now} \
 | tee -a "save/logs/log-${date_now}.txt"

@@ -423,6 +423,7 @@ class SegmentHead(nn.Cell):
         feat = ops.interpolate(input=feat,size=(self.up_factor*feat.shape[2],self.up_factor*feat.shape[3]),mode='bilinear',align_corners=False)
         return feat
 
+from line_profiler import profile
 
 # class BiSeNetV2(nn.Module):
 class BiSeNetV2(nn.Cell):
@@ -445,7 +446,7 @@ class BiSeNetV2(nn.Cell):
         self.proj_head = ProjectionHead(dim_in=128, proj_dim=self.args.proj_dim)
 
         self.init_weights()
-
+    
     # def forward(self, x:ms.Tensor):
     def construct(self, x:ms.Tensor):
         # size = x.size()[2:]

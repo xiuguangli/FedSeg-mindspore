@@ -15,13 +15,14 @@ from mindspore import Tensor
 import numpy as np
 
 def evaluate(model:nn.Cell, data_loader, device, num_classes):
+    from tqdm import tqdm
     # model.eval()
     model.set_train(False)
     loss = 0
     confmat = ConfusionMatrix(num_classes)
     header = 'Test:'
     # with torch.no_grad():
-    for image, target in data_loader:
+    for image, target in tqdm(data_loader,desc="testing",leave=False):
         # image, target = image.to(device), target.to(device)
 
         # bisenetv2:

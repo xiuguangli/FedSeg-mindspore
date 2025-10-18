@@ -1,4 +1,6 @@
 import os
+import numpy as np
+
 os.environ['GLOG_v'] = '3'
 import copy
 import json
@@ -9,7 +11,6 @@ import pickle
 # import mindspore.mint.nn.functional as F
 import mindspore.ops as F
 
-import numpy as np
 # from torch import nn
 from tqdm import tqdm
 
@@ -19,6 +20,8 @@ import mindspore.nn as nn
 # from torch.utils.data import DataLoader
 
 from mindspore.dataset import GeneratorDataset
+
+import pynvml
 
 from options import args_parser
 from update import LocalUpdate, test_inference
@@ -35,6 +38,7 @@ import warnings
 warnings.filterwarnings("ignore") # 忽略warning
 
 print('os.getcwd(): ', os.getcwd())
+
 
 
 def make_model(args):
@@ -83,26 +87,36 @@ def init_wandb(args, wandb_id, project_name='myseg'):
     except:
         print("wandb not init")
 
+import mindspore
+import mindspore.nn as nn
+import pynvml
+import gc
+def get_gpu_memory_usage(device_id=0):
+    """获取指定GPU的已用显存（单位：MiB）"""
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
+    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+    return mem_info.used / (1024**2)
+pynvml.nvmlInit()
+
+
+
 
 if __name__ == '__main__':
-    import random
     args = args_parser()
 
     start_time = time.time()
     exp_details(args)
 
     # torch.cuda.set_device(int(args.gpu))
-    mindspore.set_device(device_target="GPU", device_id=int(args.gpu)) 
+    mindspore.set_device(device_target="GPU", device_id=int(args.gpu))
 
+    # torch.manual_seed(args.seed)
     mindspore.set_seed(args.seed)
-    # mindspore.dataset.config.set_multiprocessing_timeout_interval(10)
-    if not mindspore.device_context.gpu.is_available():
-        print("not find GPU, finished!")
-        import sys
-        sys.exit()
+    idxs_users_list = [np.random.choice(range(args.num_users), int(args.frac_num), replace=False) for _ in range(args.epochs)] # 预先生成每个epoch的用户选择列表，保证可复现
     # device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # print('device: ' + device)
-
+    # ===============================
+    
     # load dataset and user groups
     if args.dataset == 'cityscapes':
         train_dataset, test_dataset, user_groups = get_dataset_cityscapes(args)
@@ -114,12 +128,17 @@ if __name__ == '__main__':
         train_dataset, test_dataset, user_groups = get_dataset_ade20k(args)
     else:
         exit('Error: unrecognized dataset')
-
+    
+    
+    
     # test_loader = DataLoader(test_dataset, batch_size=1, num_workers=args.num_workers, shuffle=False, pin_memory=True) # for global model test
     test_loader = GeneratorDataset(source=test_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=False).batch(batch_size=1)
+    train_loader = GeneratorDataset(source=train_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=False).batch(batch_size=args.local_bs)
+    print("len(train_dataset): {}, len(test_dataset): {}".format(len(train_dataset), len(test_dataset)))
+    
 
     # BUILD MODEL
-    global_model: nn.Cell = make_model(args)
+    global_model = make_model(args)
 
     # print global_model
     # from torchinfo import summary
@@ -138,8 +157,9 @@ if __name__ == '__main__':
     # resume from checkpoint
     #args.checkpoint = "fed_train_bisenetv2_c19_e1500_frac[0.035]_iid[1]_E[2]_B[8]_lr[0.05]_acti[relu]_users[144]_opti[sgd]_sche[lambda].pth"
     # if args.checkpoint != "":
-    #     # checkpoint = torch.load(os.path.join(args.root, 'save/checkpoints', args.checkpoint),map_location=device)
-    #     checkpoint = mindspore.load_checkpoint(os.path.join(args.root, 'save/checkpoints', args.checkpoint))
+    #     checkpoint = torch.load(
+    #         os.path.join(args.root, 'save/checkpoints', args.checkpoint),
+    #         map_location=device)
     #     global_model.load_state_dict(checkpoint['model'])
     #     start_ep = checkpoint['epoch'] + 1
     #     wandb_id = checkpoint['wandb_id']
@@ -150,7 +170,7 @@ if __name__ == '__main__':
     #     wandb_id = None
     start_ep = 0
     wandb_id = None
-    
+
 
     # wandb可视化 init
     if args.USE_WANDB:
@@ -171,20 +191,6 @@ if __name__ == '__main__':
     train_loss, local_test_accuracy, local_test_iou = [], [], []
     # weights = [] # comment off for checking weights update
 
-
-#    if args.is_proto:
-
-#        if not args.mom_update:
-#            localmem_dic = {}
-#            proto_mask_dic = {}
-
-#        if args.kmean_num>0:
-#            prototypes_mem = torch.randn((args.num_classes,args.num_users,args.kmean_num,args.proj_dim)).to('cuda:'+str(args.gpu))
-#        else:
-#            prototypes_mem = torch.randn((args.num_classes,args.num_users,args.proj_dim)).to('cuda:'+str(args.gpu))
-
-#        proto_mask = torch.zeros((args.num_classes,args.num_users)).to('cuda:'+str(args.gpu))
-
     if args.globalema:
         ema = EMA(global_model, args.momentum)
         ema.register()
@@ -192,9 +198,17 @@ if __name__ == '__main__':
 
     IoU_record =[]
     Acc_record = []
-    time_list = []
-    for epoch in tqdm(range(start_ep, args.epochs),desc="Global Epoch"):
-        t0 = time.time()
+    local_models_list = []
+    print('Creating LocalUpdate instances for each user...')
+    for idx_user in tqdm(range(args.num_users), desc='Creating LocalUpdate',leave=False):
+        local_model = LocalUpdate(args=args, dataset=train_dataset,idxs=user_groups[idx_user],model=global_model)
+        local_models_list.append(local_model)
+    #     # break
+    print('Created {} LocalUpdate instances'.format(len(local_models_list)))
+    print(len(user_groups[0]))
+    
+    all_trained_clients = set() # 记录所有被训练过的client
+    for epoch in range(start_ep, args.epochs):
         local_weights, local_losses = [], []
         client_dataset_len = [] # for non-IID weighted_average_weights
         print('\n\n| Global Training Round : {} |'.format(epoch))
@@ -204,86 +218,26 @@ if __name__ == '__main__':
             global_model = ema.model
         # global_model.train()
         global_model.set_train()
+        
         # m = max(int(args.frac * args.num_users), 1)
         # idxs_users = np.random.choice(range(args.num_users), m, replace=False)
-        idxs_users = np.random.choice(range(args.num_users), int(args.frac_num), replace=False) # 直接指定frac_num个local user
-       # #local_train_start_time = time.time()
-        # Local training
+        # idxs_users = np.random.choice(range(args.num_users), int(args.frac_num), replace=False) 
+        idxs_users = idxs_users_list[epoch]
 
-#        if args.is_proto:
-
-
-        #    if args.localmem and args.mom_update:
-        #        localmem_dic = {}
-        #        proto_mask_dic = {}
-             
-#
-#            if args.localmem and epoch >= args.proto_start_epoch:
-#                print('Extracting prototypes...')
-#                for idx in idxs_users:
-#                    print('\nUser idx : ' + str(idx))
-#                    local_model = LocalUpdate(args=args, dataset=train_dataset,
-#                                          idxs=user_groups[idx])
-#                    proto_tmp,label_list,label_mask_ = local_model.get_protos(model=copy.deepcopy(global_model),
-#                                                     global_round=epoch)
-#                    for cls_num in range(args.num_classes):
-#                        if cls_num in label_list:
-#                            proto_t_ = proto_tmp[cls_num]
-#                            if args.kmean_num>0:
-#                                proto_t_ = proto_t_.to(device)
-#                                proto_t_ = F.normalize(proto_t_,2)
-#
-#                                if idx not in localmem_dic:
-#                                    proto_mask_dic[idx] = label_mask_
-#                                    localmem_dic[idx]=proto_tmp.detach()    
-#                                else:
-#                                    if args.mom_update:
-#                                        old_proto =  localmem_dic[idx][cls_num]
-#  
-#
-#                                        localmem_dic[idx][cls_num]=args.momentum * old_proto + (1-args.momentum) * proto_t_.detach()
-#                                        proto_mask_dic[idx] = (label_mask_+proto_mask_dic[idx])>0
-#
-#                                    else:
-#                                        localmem_dic[idx][cls_num]=proto_t_.detach()    
-#                                        proto_mask_dic[idx] = label_mask_
-#
-#
-#
-#                            else:
-#                                proto_t_ = proto_t_.mean(0,keepdim=True)
-#                                proto_t_ = F.normalize(proto_t_,dim=1)
-#
-#                                if idx not in localmem_dic:
-#                                    localmem_dic[idx]= torch.randn((args.num_classes,args.proj_dim)).to('cuda:'+str(args.gpu))
-#                                    proto_mask_dic[idx] = torch.zeros((args.num_classes)).to('cuda:'+str(args.gpu))
-#                                    localmem_dic[idx][cls_num]=proto_t_.detach()    
-#                                else:
-#
-#                                    if args.mom_update:
-#
-#                                        if  proto_mask_dic[idx][cls_num]==0:
-#                                            localmem_dic[idx][cls_num]=proto_t_.detach()
-#                                        else:
-#                                            old_proto =  localmem_dic[idx][cls_num]
-#                                            new_proto = proto_t_
-#                                            localmem_dic[idx][cls_num]=args.momentum * old_proto + (1-args.momentum) * new_proto.detach()
-#                                    else:
-#                                        localmem_dic[idx][cls_num]=proto_t_.detach()
-#
-#                                proto_mask_dic[idx][cls_num]=1
-#
-#            print('Extracting prototypes finished')
-
+        # idxs_users = [0]
+        # idxs_users = [i for i in range(args.num_users)] # for debugging, all users participate
         print('local update')
-
         for idx in idxs_users:
-
+        # for idx in range(args.num_users):
+            all_trained_clients.add(idx)
+            if len(all_trained_clients)==args.num_users:
+                print('All clients have been trained!!!')
             print('\nUser idx : ' + str(idx))
-            
-            local_model = LocalUpdate(args=args, dataset=train_dataset,
-                                      idxs=user_groups[idx])
-
+            # local_model = LocalUpdate(args=args, dataset=train_dataset,idxs=user_groups[idx])
+            local_model = local_models_list[idx]
+            # local_model = local_models_list[0]
+            local_model.set_model_parameters(global_model)
+            local_model.set_global_model(global_model)
             
             if not args.is_proto:
                 local_mem = None
@@ -294,8 +248,7 @@ if __name__ == '__main__':
 
 
                     print('Extracting prototypes...')
-                    proto_tmp,label_list,label_mask_ = local_model.get_protos(model=copy.deepcopy(global_model),
-                                                     global_round=epoch)
+                    proto_tmp,label_list,label_mask_ = local_model.get_protos(model=None,global_round=epoch)
 
                     if args.kmean_num>0:
                         # proto_tmp = F.normalize(proto_tmp,dim=2)
@@ -305,38 +258,19 @@ if __name__ == '__main__':
                         proto_tmp = proto_tmp.mean(0)
                         # proto_tmp = F.normalize(proto_tmp,dim=1)
                         proto_tmp = F.L2Normalize(axis=1)(proto_tmp)
+                        
                         label_mask_ = label_mask_.sum(0)>0
-
-
-
 
                     local_mem=proto_tmp
                     local_mask = label_mask_
                 else:
                     local_mem = None
-                    local_mask = None
-            # 1. 定义一个临时的 checkpoint 文件路径
-            #    使用 os.getpid() 可以确保在多进程环境下文件名不冲突
+                    local_mask = None         
+
+            # local_model.train(test_loader=test_loader, train_loader=train_loader)
+            # exit()
             
-            tmp_ckpt_path = f'./tmp_global_model_{os.getpid()}.ckpt'
-            # 2. 将全局模型的参数保存到这个临时文件
-            mindspore.save_checkpoint(global_model, tmp_ckpt_path)
-
-            # 3. 创建一个新的、干净的模型实例
-            #    它的结构必须和 global_model 完全一样
-            local_model_instance =set_model_bisenetv2(args=args,num_classes=args.num_classes) # 确保这里的参数正确
-
-            # 4. 从临时文件中加载参数到新实例中
-            param_dict = mindspore.load_checkpoint(tmp_ckpt_path)
-            mindspore.load_param_into_net(local_model_instance, param_dict)
-
-            # 5. (可选但推荐) 删除临时文件
-            os.remove(tmp_ckpt_path)
-            
-            # w, loss = local_model.update_weights(model=copy.deepcopy(global_model),
-            #                                     global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
-            w, loss = local_model.update_weights(model=local_model_instance,
-                                                global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
+            w, loss = local_model.update_weights(model=None,global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
             local_weights.append(copy.deepcopy(w))
             local_losses.append(copy.deepcopy(loss))
             client_dataset_len.append(len(user_groups[idx])) # for non-IID weighted_average_weights
@@ -344,8 +278,6 @@ if __name__ == '__main__':
             #print('create LocalUpdate time: {:.2f}s'.format(LocalUpdate_time))
             #print('update_weights time: {:.2f}s'.format(update_weights_time))
             #print("Time per user: {:.2f}s".format(time.time() - time_per_user))
-            # break
-        
         loss_avg = sum(local_losses) / len(local_losses)
         train_loss.append(loss_avg)
         print('\n| Global Training Round {} Summary |'.format(epoch))
@@ -372,7 +304,7 @@ if __name__ == '__main__':
             ema.model.load_state_dict(global_weights)
             ema.update()
         else:
-            global_model.load_state_dict(global_weights)    
+            global_model.load_state_dict(global_weights)
 
 
         # weights.append(global_weights)# comment off for checking weights update
@@ -403,13 +335,14 @@ if __name__ == '__main__':
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, indent=4)
             print('\nGlobal model weights save to checkpoint')
+        
+        # continue
         # torch.save(weights, 'weights.pt')# comment off for checking weights update
 
-
         # ----------------------------下面的全是evaluate部分----------------------------
-
         # global_model.eval()
         global_model.set_train(False)
+        
         # origin : Calculate avg test accuracy over train data of a fraction of users at every epoch
         # my code : Calculate avg accuracy over LOCAL train data of users in [idxs_users] trained already at every 'local_test_frequency' epoch
         #           print global training loss on train set after every 'local_test_frequency' rounds
@@ -422,8 +355,9 @@ if __name__ == '__main__':
 
             # for c in tqdm(range(test_users)):
             for idx in idxs_users:
-                local_model = LocalUpdate(args=args, dataset=train_dataset,
-                                          idxs=user_groups[idx])
+                # local_model = LocalUpdate(args=args, dataset=train_dataset,idxs=user_groups[idx])
+                local_model = local_models_list[idx]
+                local_model.set_model_parameters(global_model)
                 print("\nLocal Test user idx: {}".format(idx))
                 print("user_groups[idx]: {}".format(user_groups[idx]))
                 acc, iou, confmat = local_model.inference(model=global_model)
@@ -472,16 +406,13 @@ if __name__ == '__main__':
             print('\nwandb commit at epoch {}'.format(epoch+1))
         except:
             print('\nwandb not init')
-        epoch_time = time.time() - t0
-        time_list.append(epoch_time)
-        print('| End of epoch {:3d} | Time: {:.2f}s ({:.2f}min) |'.format(epoch, epoch_time, epoch_time/60))
 
     print('@'*100)
     print('Average Results of final 5 epochs')
     print("|---- Global Test Accuracy: {:.2f}%".format(sum(Acc_record[-5:])/5.))
     print("|---- Global Test IoU: {:.2f}%".format(sum(IoU_record[-5:])/5.))
     print('@'*100)
-
+    
     # Plot Loss curve
     # if args.epochs > 1:
     #     # Plot Training Loss vs Communication rounds (train_loss)

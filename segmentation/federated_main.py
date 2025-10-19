@@ -87,17 +87,6 @@ def init_wandb(args, wandb_id, project_name='myseg'):
     except:
         print("wandb not init")
 
-import mindspore
-import mindspore.nn as nn
-import pynvml
-import gc
-def get_gpu_memory_usage(device_id=0):
-    """获取指定GPU的已用显存（单位：MiB）"""
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
-    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    return mem_info.used / (1024**2)
-pynvml.nvmlInit()
-
 
 
 

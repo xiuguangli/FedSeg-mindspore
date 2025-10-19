@@ -1,6 +1,6 @@
 venv/*
 save/*
-logs/*
+logs/*.txt
 data/*
 *.pyc
 __pycache__/

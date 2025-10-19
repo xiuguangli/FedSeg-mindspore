@@ -46,6 +46,8 @@ DATASET=voc #cityscapes #ade20k  #camvid
 NUM_CLS=20
 NUM_USERS=60
 
+mkdir -p save/logs
+
 # kernprof -l -v segmentation/federated_main.py \
 python -u segmentation/federated_main.py \
 --gpu="1" \

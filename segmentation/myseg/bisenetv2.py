@@ -52,7 +52,8 @@ class UpSample(nn.Cell):
                               kernel_size=1, 
                               stride=1, 
                               pad_mode='pad',
-                              padding=0)
+                              padding=0,
+                              has_bias=True)
         self.up = nn.PixelShuffle(factor)
         self.init_weight()
 
@@ -572,6 +573,61 @@ class BiSeNetV2(nn.Cell):
                 add_param_to_list(child, wd_params, nowd_params)
         return wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params
 
+    def get_params1(self):
+        """
+        将模型的参数分组，用于优化器设置。
+        - 1D 参数 (如 bias, beta, gamma) 不设置权重衰减。
+        - 4D 参数 (如 conv.weight) 设置权重衰减。
+        - head 和 aux 模块的参数被单独分组，以便应用不同的学习率。
+        """
+        def add_param_to_list(cell:nn.Cell, wd_params, nowd_params, wd_params_name, nowd_params_name):
+            # 使用 cell.trainable_params() 获取可训练参数
+            for param in cell.trainable_params():
+                # 使用 param.ndim 获取参数维度
+                if param.ndim == 1:
+                    # 1D 参数通常是 bias, LayerNorm/BatchNorm 的 beta/gamma
+                    nowd_params.append(param)
+                    nowd_params_name.append(f"{param.name}")
+                elif param.ndim == 4:
+                    # 4D 参数通常是 Conv2d 的 weight
+                    wd_params.append(param)
+                    wd_params_name.append(f"{param.name}")
+
+            
+            # for name, param in cell.parameters_and_names():
+            #     if param.ndim == 1:
+            #         # 1D 参数通常是 bias, LayerNorm/BatchNorm 的 beta/gamma
+            #         nowd_params.append(param)
+            #         print(f"{name=},{param.shape=}")
+            #     elif param.ndim == 4:
+            #         # 4D 参数通常是 Conv2d 的 weight
+            #         wd_params.append(param)
+                
+        def print_param_list(param_list, param_list_name):
+            print("=====print_param_list=====")
+            for idx, (name, param ) in enumerate(zip(param_list_name, param_list)):
+                print(f" {idx=} {name=}, {param.shape=}")
+        
+
+        wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params = [], [], [], []
+        wd_params_name, nowd_params_name, lr_mul_wd_params_name, lr_mul_nowd_params_name = [], [], [], []
+        
+        # 使用 self.name_cells() 遍历直接子 Cell
+        # print(type(self.name_cells()))
+        # exit()
+        for name, child in self.name_cells().items():
+            # print(1)
+            if 'head' in name or 'aux' in name:
+                add_param_to_list(child, lr_mul_wd_params, lr_mul_nowd_params, lr_mul_wd_params_name, lr_mul_nowd_params_name)
+            else:
+                add_param_to_list(child, wd_params, nowd_params, wd_params_name, nowd_params_name)
+        print_param_list(lr_mul_nowd_params, lr_mul_nowd_params_name)
+        print_param_list(lr_mul_wd_params, lr_mul_wd_params_name)
+        print_param_list(nowd_params, nowd_params_name)
+        print_param_list(wd_params, wd_params_name)
+        exit()
+        return wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params
+    
     def get_params(self):
         """
         将模型的参数分组，用于优化器设置。
@@ -589,14 +645,6 @@ class BiSeNetV2(nn.Cell):
                 elif param.ndim == 4:
                     # 4D 参数通常是 Conv2d 的 weight
                     wd_params.append(param)
-                else:
-                    # 增加了对其他维度参数的处理，例如 Dense 层的 2D 权重
-                    # 原始代码的 print(name) 是一个bug，这里我们打印参数自身的名称和形状
-                    print(f"[get_params] Warning: Parameter '{param.name}' with shape {param.shape} "
-                          f"was not classified into wd/nowd group. Considering it as a wd_param by default.")
-                    # 默认可以将其加入 wd_params，或根据需要处理
-                    wd_params.append(param) 
-
 
         wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params = [], [], [], []
         
@@ -611,22 +659,25 @@ class BiSeNetV2(nn.Cell):
                 add_param_to_list(child, wd_params, nowd_params)
                 
         return wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params
-    
+ 
 # class ProjectionHead(nn.Module):
 class ProjectionHead(nn.Cell):
     def __init__(self, dim_in, proj_dim=256, proj='convmlp', ):
         super(ProjectionHead, self).__init__()
 
         if proj == 'linear':
-            self.proj = nn.Conv2d(dim_in, proj_dim, kernel_size=1)
+            # self.proj = nn.Conv2d(dim_in, proj_dim, kernel_size=1)
+            self.proj = nn.Conv2d(dim_in, proj_dim, kernel_size=1, has_bias=True)
         elif proj == 'convmlp':
             # self.proj = nn.Sequential(
             self.proj = nn.SequentialCell(
-                nn.Conv2d(dim_in, dim_in, kernel_size=1),
+                # nn.Conv2d(dim_in, dim_in, kernel_size=1),
+                nn.Conv2d(dim_in, dim_in, kernel_size=1, has_bias=True),
                 nn.BatchNorm2d(dim_in),
                 # nn.ReLU(inplace=True),
                 nn.ReLU(),
-                nn.Conv2d(dim_in, proj_dim, kernel_size=1)
+                # nn.Conv2d(dim_in, proj_dim, kernel_size=1)
+                nn.Conv2d(dim_in, proj_dim, kernel_size=1, has_bias=True)
             )
     # def forward(self, x):
     def construct(self, x):

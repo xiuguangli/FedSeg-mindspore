@@ -75,6 +75,7 @@ def set_optimizer0(model, args):
 
 def set_optimizer(model, args):
     # 分支一：模型有自定义的 get_params 方法
+
     if hasattr(model, 'get_params'):
         # 假设 model.get_params() 已经被转换为 MindSpore 版本
         wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params = model.get_params()
@@ -92,6 +93,7 @@ def set_optimizer(model, args):
             # 该组同时覆盖 learning_rate 和 weight_decay
             {'params': lr_mul_nowd_params, 'weight_decay': wd_val, 'lr': args.lr * 10},
         ]
+        
     # 分支二：通用参数分组逻辑
     else:
         wd_params, non_wd_params = [], []
@@ -108,11 +110,22 @@ def set_optimizer(model, args):
             {'params': non_wd_params, 'weight_decay': 0},
         ]
     # 使用 mindspore.nn.SGD
+    def print_params(params_list):
+        for i, param_group in enumerate(params_list):
+            print(f"Parameter group {i}:")
+            for key, value in param_group.items():
+                if key == 'params':
+                    # print(f"  {key}: {len([p.shape for p in value])}")
+                    for idx, p in enumerate(value):
+                        print(f"     {idx} : {p.shape}")
+                else:
+                    print(f"  {key}: {value}")
+
     optim = nn.SGD(
-        # params_list,
-        model.trainable_params(),  # 如果参数分组有问题，可以直接传入所有可训练参数
-        # learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
-        learning_rate=args.lr,  # 参数名从 lr 变为 learning_rate
+        params_list,
+        # model.trainable_params(),  # 如果参数分组有问题，可以直接传入所有可训练参数
+        learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
+        # learning_rate=args.lr,  # 参数名从 lr 变为 learning_rate
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )

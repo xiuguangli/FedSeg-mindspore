@@ -48,6 +48,8 @@ DATASET=camvid #cityscapes #ade20k  #camvid
 NUM_CLS=11
 NUM_USERS=22
 
+mkdir -p save/logs
+
 python -u segmentation/federated_main.py \
 --gpu="0" \
 --dataset=$DATASET \

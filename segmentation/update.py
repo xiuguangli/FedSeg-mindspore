@@ -23,30 +23,6 @@ from myseg.bisenet_utils import OhemCELoss,BackCELoss,CriterionPixelPair,Criteri
 from myseg.magic import MultiEpochsDataLoader
 #from segmentation_models_pytorch.losses import JaccardLoss,DiceLoss,FocalLoss,LovaszLoss,SoftBCEWithLogitsLoss
 
-class Network(nn.Cell):
-    def __init__(self):
-        super().__init__()
-        self.flatten = nn.Flatten()
-        self.dense_relu_sequential = nn.SequentialCell(
-            nn.Dense(28*28, 512),
-            nn.ReLU(),
-            nn.Dense(512, 512),
-            nn.ReLU(),
-            nn.Dense(512, 10)
-        )
-
-    def construct(self, x):
-        x = self.flatten(x)
-        logits = self.dense_relu_sequential(x)
-        return logits
-
-import pynvml
-def get_gpu_memory_usage(device_id=0):
-    """获取指定GPU的已用显存（单位：MiB）"""
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
-    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    return mem_info.used / (1024**2)
-pynvml.nvmlInit()
 
 # class DatasetSplit(Dataset):
 class DatasetSplit():
@@ -618,7 +594,6 @@ class LocalUpdate(object):
             exit('Error: unrecognized model')
         self.criteria_pre = criteria_pre
         self.criteria_aux = criteria_aux
-        optimizer = nn.SGD(self.model.trainable_params(), learning_rate=0.001, momentum=0.9, weight_decay=args.weight_decay)
         self.optimizer = optimizer
           
         self.grad_fn = mindspore.value_and_grad(self.forward_fn, None, self.optimizer.parameters, has_aux=True)
@@ -934,7 +909,7 @@ class LocalUpdate(object):
         model = self.model
         model.set_train()
         epoch_loss = []
-        self.print_param(model,prefix='Start')
+        # self.print_param(model,prefix='Start')
 
         # Set optimizer and lr_scheduler for the local updates
         args = self.args
@@ -944,7 +919,6 @@ class LocalUpdate(object):
         start_time = time.time()
         for iter in range(args.local_ep):
             batch_loss = []
-            mem_before = get_gpu_memory_usage(int(self.args.gpu))
             for batch_idx, (images, labels) in enumerate(tqdm(self.trainloader,desc=f"Train Epoch {iter}",leave=False)):
                 labels = labels.astype(mindspore.int32)
                 # images, labels = images.to(self.device), labels.to(self.device)
@@ -964,8 +938,6 @@ class LocalUpdate(object):
                 # break
             
             epoch_loss.append(sum(batch_loss)/len(batch_loss))
-            mem_after = get_gpu_memory_usage(int(self.args.gpu))
-            print(f"Global Round {global_round} - Epoch {iter} - before: {mem_before} - after: {mem_after} - 显存变化: {mem_after - mem_before:.2f} MiB - Tag: {mem_after - mem_before>0}")
             # 打印学习率
             #print("Local Epoch: {}, lr: {:.3e}".format(iter, lr_scheduler.get_lr()[0]))
             #print("Local Epoch: {}, lr: {:.3e}".format(iter, optimizer.param_groups[0]['lr'])) #两个打印学习率的方式都可以
@@ -1008,7 +980,7 @@ class LocalUpdate(object):
             else:
                 print('Loss_CE:{:.6f}'.format(loss_ce))
             
-        self.print_param(model,prefix='After')
+        # self.print_param(model,prefix='After')
         return model.state_dict(), sum(epoch_loss) / len(epoch_loss)
 
 

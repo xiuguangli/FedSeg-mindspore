@@ -1,4 +1,5 @@
 import os
+from pyexpat import model
 import numpy as np
 
 os.environ['GLOG_v'] = '3'
@@ -122,7 +123,7 @@ if __name__ == '__main__':
     
     # test_loader = DataLoader(test_dataset, batch_size=1, num_workers=args.num_workers, shuffle=False, pin_memory=True) # for global model test
     test_loader = GeneratorDataset(source=test_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=False).batch(batch_size=1)
-    train_loader = GeneratorDataset(source=train_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=False).batch(batch_size=args.local_bs)
+    train_loader = GeneratorDataset(source=train_dataset, column_names=["image", "label"], num_parallel_workers=args.num_workers, shuffle=True).batch(batch_size=args.local_bs)
     print("len(train_dataset): {}, len(test_dataset): {}".format(len(train_dataset), len(test_dataset)))
     
 
@@ -192,11 +193,13 @@ if __name__ == '__main__':
     for idx_user in tqdm(range(args.num_users), desc='Creating LocalUpdate',leave=False):
         local_model = LocalUpdate(args=args, dataset=train_dataset,idxs=user_groups[idx_user],model=global_model)
         local_models_list.append(local_model)
-    #     # break
+        # break
     print('Created {} LocalUpdate instances'.format(len(local_models_list)))
     print(len(user_groups[0]))
     
     all_trained_clients = set() # 记录所有被训练过的client
+    # args.is_proto = False
+    
     for epoch in range(start_ep, args.epochs):
         local_weights, local_losses = [], []
         client_dataset_len = [] # for non-IID weighted_average_weights
@@ -207,11 +210,15 @@ if __name__ == '__main__':
             global_model = ema.model
         # global_model.train()
         global_model.set_train()
+        # print(11111111111111111111111111111111)
+        # local_models_list[0].train(model = copy.deepcopy(global_model),test_loader=test_loader, train_loader=train_loader)
+        # exit()
         
         # m = max(int(args.frac * args.num_users), 1)
         # idxs_users = np.random.choice(range(args.num_users), m, replace=False)
         # idxs_users = np.random.choice(range(args.num_users), int(args.frac_num), replace=False) 
         idxs_users = idxs_users_list[epoch]
+        # idxs_users = [0]
 
         # idxs_users = [0]
         # idxs_users = [i for i in range(args.num_users)] # for debugging, all users participate
@@ -259,10 +266,12 @@ if __name__ == '__main__':
             # local_model.train(test_loader=test_loader, train_loader=train_loader)
             # exit()
             
-            w, loss = local_model.update_weights(model=None,global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
+            # w, loss = local_model.update_weights(model=None,global_round=epoch,prototypes = local_mem,proto_mask = local_mask)
+            w, loss = local_model.update_weights(model=None,global_round=epoch,prototypes = local_mem,proto_mask = local_mask,test_loader=test_loader)
             local_weights.append(copy.deepcopy(w))
             local_losses.append(copy.deepcopy(loss))
             client_dataset_len.append(len(user_groups[idx])) # for non-IID weighted_average_weights
+            # client_dataset_len.append(len(train_dataset)) # for non-IID weighted_average_weights
 
             #print('create LocalUpdate time: {:.2f}s'.format(LocalUpdate_time))
             #print('update_weights time: {:.2f}s'.format(update_weights_time))

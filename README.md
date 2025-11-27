@@ -19,8 +19,14 @@ ADE20k: 链接: https://pan.baidu.com/s/13ypIWZFCa58oZT7cA3KWNA  密码: tps2
 ## Training and Evaluation
 
 Put the downloaded datasets into the folder 'data'
+
+data
+  └── voc
+        ├── images
+        └── labels
+
 ```
-sh run_city.sh
+sh run_voc.sh
 ```
 
 ## Citation

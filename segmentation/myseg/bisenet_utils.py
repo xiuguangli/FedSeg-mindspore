@@ -73,7 +73,8 @@ def set_optimizer0(model, args):
     # )
     return optim
 
-def set_optimizer(model, args):
+import mindspore.nn as nn
+def set_optimizer(model:nn.Cell, args):
     # 分支一：模型有自定义的 get_params 方法
 
     if hasattr(model, 'get_params'):
@@ -122,10 +123,10 @@ def set_optimizer(model, args):
                     print(f"  {key}: {value}")
 
     optim = nn.SGD(
-        params_list,
-        # model.trainable_params(),  # 如果参数分组有问题，可以直接传入所有可训练参数
-        learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
-        # learning_rate=args.lr,  # 参数名从 lr 变为 learning_rate
+        # params_list,
+        model.trainable_params(),  # 如果参数分组有问题，可以直接传入所有可训练参数 
+        # learning_rate=args.lr_scheduler_,  # 参数名从 lr 变为 learning_rate
+        learning_rate=args.lr,  # 参数名从 lr 变为 learning_rate 2ka
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )

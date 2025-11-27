@@ -1,3 +1,5 @@
+from itertools import count
+from os import cpu_count
 import time
 import copy
 from tracemalloc import start
@@ -559,8 +561,8 @@ class LocalUpdate(object):
             )
         }
         args.lr_scheduler_ = scheduler_dict[args.lr_scheduler]
+        optimizer = myseg.bisenet_utils.set_optimizer(self.model, args)
         if args.model == 'bisenetv2':
-            optimizer = myseg.bisenet_utils.set_optimizer(self.model, args)
             if args.losstype=='ohem':
                 criteria_pre = OhemCELoss(0.7)
                 criteria_aux = [OhemCELoss(0.7) for _ in range(4)]  # num_aux_heads=4
@@ -594,7 +596,43 @@ class LocalUpdate(object):
             exit('Error: unrecognized model')
         self.criteria_pre = criteria_pre
         self.criteria_aux = criteria_aux
+        # self.criteria_pre = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+        # self.criteria_pre = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+        # self.criteria_aux = [nn.CrossEntropyLoss(ignore_index=255, reduction='mean') for _ in range(4)]  # num_aux_heads=4
+        
+        wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params = model.get_params()
+        
+        wd_val = 0  # 为不应用 weight decay 的参数组设置的值
+        
+        # 参数分组的字典结构与 PyTorch 兼容
+        params_list = [
+            # 该组使用优化器全局的 learning_rate 和 weight_decay
+            {'params': wd_params}, 
+            # 该组覆盖 weight_decay
+            {'params': nowd_params, 'weight_decay': wd_val},
+            # 该组覆盖 learning_rate
+            {'params': lr_mul_wd_params, 'lr': args.lr * 10},
+            # 该组同时覆盖 learning_rate 和 weight_decay
+            {'params': lr_mul_nowd_params, 'weight_decay': wd_val, 'lr': args.lr * 10},
+        ]
+        
+        optimizer = nn.SGD(
+            params_list,
+            # self.model.trainable_params(), 
+            # learning_rate=args.lr,  
+            # learning_rate=0.0002,  
+            learning_rate=0.002,  
+            # momentum=args.momentum,
+            momentum=0.9,
+            weight_decay=args.weight_decay,
+        )
         self.optimizer = optimizer
+          
+        # 1.ce + trainable_params() + learning_rate=0.0002 + momentum=0.9 正常
+        # 2.backce + trainable_params() + learning_rate=0.0002 + momentum=0.9  正常，略低
+        # 3.backce + params_list + learning_rate=0.0002 + momentum=0.9 不正常
+        # 4.backce + params_list + learning_rate=0.002 + momentum=0.9 
+        
           
         self.grad_fn = mindspore.value_and_grad(self.forward_fn, None, self.optimizer.parameters, has_aux=True)
         self.global_model:nn.Cell = copy.deepcopy(model)
@@ -652,7 +690,7 @@ class LocalUpdate(object):
             loss_pre = self.criteria_pre(logits, labels_)
             # loss = loss_pre
             # return loss,0,0,0,0,0,0
-        
+# ===============================        
             loss_aux = [crit(lgt, labels_) for crit, lgt in zip(self.criteria_aux, logits_aux)]
             loss = loss_pre + sum(loss_aux)
         else:
@@ -763,7 +801,10 @@ class LocalUpdate(object):
             loss_pi_item=0
             loss_pa_item=0
         return loss,loss_ce,loss_1_item,loss_pi_item,loss_pa_item,loss_con_item,loss_con_2_item
+# ===============================        
            
+
+
     def train_val_test(self, dataset, idxs):
         """
         Returns train, validation and test dataloaders for a given dataset
@@ -902,22 +943,25 @@ class LocalUpdate(object):
             break
     
     
-    def update_weights(self, model, global_round,prototypes=None,proto_mask=None):
+    def update_weights(self, model, global_round,prototypes=None,proto_mask=None,test_loader=None):
         # Set mode to train model
         # model.train()
         # 在 调用 update 之前，先调用 self.set_model_parameters(model)
         model = self.model
         model.set_train()
         epoch_loss = []
+        args = self.args
+        
         # self.print_param(model,prefix='Start')
 
         # Set optimizer and lr_scheduler for the local updates
-        args = self.args
 
         from tqdm import tqdm
         # training
         start_time = time.time()
-        for iter in range(args.local_ep):
+        # for iter in range(args.local_ep):
+        for iter in range(1):
+        # for iter in range(1000):
             batch_loss = []
             for batch_idx, (images, labels) in enumerate(tqdm(self.trainloader,desc=f"Train Epoch {iter}",leave=False)):
                 labels = labels.astype(mindspore.int32)
@@ -942,6 +986,10 @@ class LocalUpdate(object):
             #print("Local Epoch: {}, lr: {:.3e}".format(iter, lr_scheduler.get_lr()[0]))
             #print("Local Epoch: {}, lr: {:.3e}".format(iter, optimizer.param_groups[0]['lr'])) #两个打印学习率的方式都可以
             #lr_scheduler.step()
+            
+            # test_acc, test_iou, confmat = test_inference(args, model, test_loader)
+            # print(f"iter {iter} Test Accuracy: {test_acc:.6f} | Test IoU: {test_iou:.6f} loss: {epoch_loss[iter]:.6f}")
+            
 
             if args.verbose:
                 string = '| Global Round : {} | Local Epoch : {} | {} images\tLoss: {:.6f}'.format(
@@ -983,6 +1031,95 @@ class LocalUpdate(object):
         # self.print_param(model,prefix='After')
         return model.state_dict(), sum(epoch_loss) / len(epoch_loss)
 
+    def update_weights1(self, model, global_round,prototypes=None,proto_mask=None,test_loader=None):
+        # Set mode to train model
+        # model.train()
+        # 在 调用 update 之前，先调用 self.set_model_parameters(model)
+        for j in range(10000):
+            model = self.model
+            model.set_train()
+            epoch_loss = []
+            args = self.args
+            
+            # self.print_param(model,prefix='Start')
+
+            # Set optimizer and lr_scheduler for the local updates
+
+            from tqdm import tqdm
+            # training
+            start_time = time.time()
+            # for iter in range(args.local_ep):
+            for iter in range(1):
+            # for iter in range(1000):
+                batch_loss = []
+                for batch_idx, (images, labels) in enumerate(tqdm(self.trainloader,desc=f"Train Epoch {iter}",leave=False)):
+                    labels = labels.astype(mindspore.int32)
+                    # images, labels = images.to(self.device), labels.to(self.device)
+                    #print(labels.shape) # torch.Size([8, 512, 1024])
+                    (loss,loss_ce,loss_1_item,loss_pi_item,loss_pa_item,loss_con_item,loss_con_2_item),grads = self.grad_fn(global_round,images, labels,prototypes,proto_mask)
+                    self.optimizer(grads)
+                    
+                    # optimizer.zero_grad()
+                    # loss.backward()
+                    # optimizer.step()  # update params
+                    batch_loss.append(loss.item())
+                    # batch_loss.append(float(loss.asnumpy()))
+
+                    # 打印学习率
+                    # print("Local Epoch: {}, batch_idx: {}, lr: {:.3e}".format(iter, batch_idx, lr_scheduler.get_lr()[0]))
+                    # lr_scheduler.step() # lr_scheduler:poly,根据iter(每个batch)更新lr, (不是根据local_epoch更新)
+                    # break
+                
+                epoch_loss.append(sum(batch_loss)/len(batch_loss))
+                # 打印学习率
+                #print("Local Epoch: {}, lr: {:.3e}".format(iter, lr_scheduler.get_lr()[0]))
+                #print("Local Epoch: {}, lr: {:.3e}".format(iter, optimizer.param_groups[0]['lr'])) #两个打印学习率的方式都可以
+                #lr_scheduler.step()
+                
+                test_acc, test_iou, confmat = test_inference(args, model, test_loader)
+                print(f"iter {iter} Test Accuracy: {test_acc:.6f} | Test IoU: {test_iou:.6f} loss: {epoch_loss[iter]:.6f}")
+                
+
+                if args.verbose:
+                    string = '| Global Round : {} | Local Epoch : {} | {} images\tLoss: {:.6f}'.format(
+                        # global_round, iter+1, len(self.trainloader.dataset), loss.item())
+                        global_round, iter+1, len(self.trainloader.dataset), float(loss.asnumpy()))
+                    print(string)
+            
+            # after training, print logs
+            # strings = [
+            #     '| Global Round : {} | Local Epochs : {} | {} images\tLoss: {:.6f}'.format(
+            #     global_round, args.local_ep, len(self.trainloader.dataset), loss.item()),
+            #     '\nLocal Train Run Time: {0:0.2f}s'.format(time.time()-start_time),
+            #     ]
+
+            # 不输出Local Train Run Time了
+            # strings = [
+            #     '| Global Round : {} | Local Epochs : {} | {} images\tLoss: {:.6f}'.format(
+            #         global_round, args.local_ep, len(self.trainloader.dataset), loss.item())
+            # ]
+            strings = [
+                '| Global Round : {} | Local Epochs : {} | {} images\tLoss: {:.6f}'.format(
+                    # global_round, args.local_ep, len(self.trainloader.dataset),float(loss.asnumpy()))
+                    global_round, args.local_ep, len(self.trainloader_idx),float(loss.asnumpy()))
+            ]
+            print(''.join(strings))
+            if args.distill:
+                print('Loss_CE:{:.6f} | loss_pi:{:.6f} | loss_pa:{:.6f}'.format(loss_1_item,loss_pi_item,loss_pa_item))
+            
+            if args.is_proto:
+                if global_round>= args.proto_start_epoch:
+
+                    if args.pseudo_label:
+                        print('Loss_CE:{:.6f} | loss_contrast:{:.6f} loss_pseudo: {:.6f}'.format(loss_ce,loss_con_item,loss_con_2_item))
+                    else:
+                        print('Loss_CE:{:.6f} | loss_contrast:{:.6f}'.format(loss_ce,loss_con_item))
+                else:
+                    print('Loss_CE:{:.6f}'.format(loss_ce))
+            
+        # self.print_param(model,prefix='After')
+        return model.state_dict(), sum(epoch_loss) / len(epoch_loss),model
+
 
     def inference(self, model):
         """ Returns the inference accuracy and loss.
@@ -991,18 +1128,55 @@ class LocalUpdate(object):
         # print(str(confmat)) # local test也输出信息
         return confmat.acc_global, confmat.iou_mean, str(confmat)
 
-    def train(self,test_loader,train_loader):  
-        from tqdm import tqdm   
-        model = self.model
+    def train(self, model, test_loader, train_loader):
+        # def print_param(model: nn.Cell):
+        #     # 打印模型的每一层的参数的前5个值，用于调试。最好可以打印出名字，方便比较
+        #     print("--- Printing Model Parameters ---")
+        #     count = 0
+        #     for name, param in model.parameters_and_names():
+        #         # 将参数转换为NumPy数组，展平后取前5个值
+        #         if "moving_mean" in name or "moving_variance" in name:
+        #             continue  # 跳过 BatchNorm 的移动均值和方差参数
+        #         param_data_flat = param.data.asnumpy().flatten()
+        #         print(f"  {count:<3}: {name:<50} | Shape: {str(param.shape):<30} | Values: {param_data_flat[:5]}")
+        #         count += 1
+        #     print("---------------------------------")
+        # print_param(model)
+        # exit()
+        
+        def print_param(model: nn.Cell,prefix=''):
+            # 打印模型的每一层的参数的前5个值，用于调试。最好可以打印出名字，方便比较
+            print("--- Printing Model Parameters ---")
+            count = 0
+            for name, param in model.parameters_and_names():
+                # 将参数转换为NumPy数组，展平后取前5个值
+                param_data_flat = param.data.asnumpy().flatten()
+                print(f"{prefix}  {count:<3}: {name:<50} | {param_data_flat[:5]}")
+                count += 1
+                break
+            print("---------------------------------")
+        
+        from tqdm import tqdm
         model.set_train()
         args = self.args
+        
+        wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params = model.get_params()
+        wd_val = 0
+        params_list = [
+            {'params': wd_params, },
+            {'params': nowd_params, 'weight_decay': wd_val},
+            {'params': lr_mul_wd_params, 'lr': args.lr * 10},
+            {'params': lr_mul_nowd_params, 'weight_decay': wd_val, 'lr': args.lr * 10},
+        ]
+        # print(params_list)
         # optimizer = myseg.bisenet_utils.set_optimizer(model, args)
         
         # criteria_pre = BackCELoss(args)
         # criteria_aux = [BackCELoss(args) for _ in range(4)]
         
         # optimizer = nn.SGD(model.trainable_params(), learning_rate=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-        optimizer = nn.SGD(model.trainable_params(), learning_rate=0.00001, momentum=0.9, weight_decay=args.weight_decay)
+        # optimizer = nn.SGD(model.trainable_params(), learning_rate=0.0002, momentum=0.9, weight_decay=args.weight_decay)
+        optimizer = nn.SGD(params_list, learning_rate=0.0002, momentum=0.9, weight_decay=args.weight_decay)
         criteria_pre = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
         
         def forward_fn(images,labels):
@@ -1014,15 +1188,27 @@ class LocalUpdate(object):
             return loss, feat_head
         grad_fn = mindspore.value_and_grad(forward_fn, None, optimizer.parameters, has_aux=True)
 
+        epoch_loss = []
+        print(f"train_loader.length: {len(train_loader)}; test_loader.length: {len(test_loader)}")
         for iter in range(100000):
+            batch_loss = []
             for batch_idx, (images, labels) in enumerate(tqdm(train_loader,desc=f"Train Epoch {iter}",leave=False)):
+                # images = ops.OnesLike()(images)  # 全1张量
+                # labels = ops.OnesLike()(labels)  # 全0张量
+                
+                # print(f"{images.flatten().sum()=} {labels.flatten().sum()=}")
+                # print_param(model, prefix=f"Before Update Iter {iter} Batch {batch_idx}")
                 labels = labels.astype(mindspore.int32)
-                (_,_), grads = grad_fn(images, labels)
+                # exit()
+                (loss,_), grads = grad_fn(images, labels)
                 optimizer(grads)
+                # print_param(model, prefix=f"After Update Iter {iter} Batch {batch_idx}")
+                # exit()
+                batch_loss.append(loss.item())
+            epoch_loss.append(sum(batch_loss)/len(batch_loss))
             acc, iou, confmat = test_inference(args=args, model=model, testloader=test_loader)
-            print(f"Trainloader Local Epoch: {iter}, train_loader.length: {len(test_loader)}, acc: {acc:4f}, iou: {iou:4f}")
-            print("="*50, "\n")
-    
+            print(f"{iter}, test acc: {acc:4f}, iou: {iou:4f} , loss: {epoch_loss[iter]:.6f}")
+            
                 
             
             

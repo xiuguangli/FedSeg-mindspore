@@ -49,7 +49,7 @@ NUM_USERS=60
 mkdir -p save/logs
 
 python -u segmentation/federated_main.py \
---gpu="0" \
+--gpu="3" \
 --dataset=$DATASET \
 --root_dir=$ROOT_DIR \
 --USE_ERASE_DATA=True \

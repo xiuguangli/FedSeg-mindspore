@@ -506,34 +506,25 @@ class BiSeNetV2(nn.Cell):
         if not self.args.rand_init:
             self.load_pretrain()
     
+    
+    
     def init_weights(self):
-        """初始化网络权重"""
-        # 使用 cells_and_names() 遍历所有子 Cell
         for name, cell in self.cells_and_names():
-            # 检查是否为卷积层或全连接层 (MindSpore 中叫 Dense)
             if isinstance(cell, (nn.Conv2d, nn.Dense)):
-                # 使用 HeNormal 初始化权重
-                cell.weight.set_data(initializer(HeNormal(mode='fan_out', nonlinearity='relu'),
-                                                      cell.weight.shape, cell.weight.dtype))
+                cell.weight.set_data(initializer(HeNormal(mode='fan_out', nonlinearity='relu'),cell.weight.shape, cell.weight.dtype))
+                # cell.weight.set_data(initializer("ones",cell.weight.shape, cell.weight.dtype))
                 if cell.bias is not None:
-                    # 使用 0 初始化偏置
                     cell.bias.set_data(initializer('zeros', cell.bias.shape, cell.bias.dtype))
             
-            # 检查是否为 BatchNorm 层
             elif isinstance(cell, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                # 检查特殊的 'last_bn' 标志
                 if hasattr(cell, 'last_bn') and cell.last_bn:
-                    # gamma (weight) 初始化为 0
                     cell.gamma.set_data(initializer('zeros', cell.gamma.shape, cell.gamma.dtype))
                 else:
-                    # gamma (weight) 初始化为 1
                     cell.gamma.set_data(initializer('ones', cell.gamma.shape, cell.gamma.dtype))
-                # beta (bias) 初始化为 0
                 cell.beta.set_data(initializer('zeros', cell.beta.shape, cell.beta.dtype))
 
         if not self.args.rand_init:
             self.load_pretrain()
-
 
     def load_pretrain(self):
         # state = modelzoo.load_url(backbone_url)

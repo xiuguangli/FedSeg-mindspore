@@ -50,7 +50,7 @@ mkdir -p save/logs
 
 # kernprof -l -v segmentation/federated_main.py \
 python -u segmentation/federated_main.py \
---gpu="1" \
+--gpu="3" \
 --dataset=$DATASET \
 --root_dir=$ROOT_DIR \
 --USE_ERASE_DATA=True \

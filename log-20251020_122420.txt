@@ -1,0 +1,291 @@
+os.getcwd():  /home/lxg/work/Miao/FedSeg
+
+Experimental details:
+    Dataset                 : voc
+    Dataset root_dir        : ./data/voc
+    USE_ERASE_DATA          : True
+    Number of classes       : 20
+    Split data (train data) : train
+    Model                   : bisenetv2
+    resume from Checkpoint  : 
+    Optimizer               : sgd
+    Scheduler               : step
+    Learning rate           : 0.05
+    Momentum                : 0.99
+    weight decay            : 0.0005
+    Global Rounds           : 1200
+
+    Federated parameters:
+    Non-IID
+    Number of global users  : 60
+    Fraction num of users   : 5
+    Local Epochs            : 2
+    Local Batch size        : 8
+
+    Logging parameters:
+    save_frequency          : 20
+    local_test_frequency    : 9999
+    global_test_frequency   : 1
+    USE_WANDB               : False
+
+['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+[0, 86, 151, 244, 320, 387, 462, 539, 636, 683, 747, 809, 900, 965, 1041, 1126, 1191, 1254, 1310, 1389]
+['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+[0, 86, 151, 244, 320, 387, 462, 539, 636, 683, 747, 809, 900, 965, 1041, 1126, 1191, 1254, 1310, 1389]
+find 1464 examples
+['all']
+[0]
+['all']
+[0]
+find 1449 examples
+
+Getting non-iid user indices for cityscapes: 
+city_names:  ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+num_classes:  20
+aeroplane 86
+bicycle 65
+bird 93
+boat 76
+bottle 67
+bus 75
+car 77
+cat 97
+chair 47
+cow 64
+diningtable 62
+dog 91
+horse 65
+motorbike 76
+person 85
+pottedplant 65
+sheep 63
+sofa 56
+train 79
+tvmonitor 75
+city_lens:  [86, 65, 93, 76, 67, 75, 77, 97, 47, 64, 62, 91, 65, 76, 85, 65, 63, 56, 79, 75]
+num_users_per_city: 60 / 20 = 3
+Time consumed to get non-iid user indices: 0.00s
+
+len(train_dataset): 1464, len(test_dataset): 1449
+exp_name :fed_20251020_122420_train_bisenetv2_c20_e1200_frac[5]_iid[False]_E[2]_B[8]_lr[0.05]_users[60]_opti[sgd]_sche[step]
+
+Training global model on 5 of 60 users locally for 1200 epochs
+Creating LocalUpdate instances for each user...
+Created 1 LocalUpdate instances
+28
+
+
+| Global Training Round : 0 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 51.758808 | Test IoU: 30.077031 loss: 5.535262
+| Global Round : 0 | Local Epochs : 2 | 1464 images	Loss: 4.219484
+
+| Global Training Round 0 Summary |
+Local Train One global epoch loss_avg: 5.535262
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 51.8
+average row correct: ['45.3', '28.7', '64.3', '35.2', '30.8', '36.8', '72.9', '39.9', '24.7', '37.7', '43.3', '72.8', '6.8', '53.2', '77.1', '63.5', '27.2', '28.5', '56.9', '63.3']
+IoU: ['33.3', '22.9', '42.6', '25.4', '26.7', '30.5', '40.0', '33.9', '16.3', '19.5', '30.8', '28.5', '6.1', '29.4', '67.0', '27.3', '21.6', '21.9', '33.4', '44.4']
+mean IoU: 30.1
+
+Results after 1 global rounds of training:
+|---- Global Test Accuracy: 51.76%
+|---- Global Test IoU: 30.08%
+
+Total Run Time: 2.22min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 1 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 55.975419 | Test IoU: 34.676829 loss: 2.755769
+| Global Round : 1 | Local Epochs : 2 | 1464 images	Loss: 2.992133
+
+| Global Training Round 1 Summary |
+Local Train One global epoch loss_avg: 2.755769
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 56.0
+average row correct: ['44.9', '38.2', '66.5', '44.3', '43.6', '59.5', '77.0', '44.2', '25.5', '40.4', '46.0', '74.1', '13.0', '55.9', '79.3', '60.2', '40.7', '36.4', '46.7', '65.4']
+IoU: ['36.4', '29.0', '47.0', '30.6', '36.8', '42.8', '42.1', '37.2', '17.2', '22.7', '34.9', '31.2', '11.2', '32.3', '69.2', '34.7', '28.2', '26.5', '34.0', '49.4']
+mean IoU: 34.7
+
+Results after 2 global rounds of training:
+|---- Global Test Accuracy: 55.98%
+|---- Global Test IoU: 34.68%
+
+Total Run Time: 4.24min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 2 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 58.444011 | Test IoU: 37.084505 loss: 2.025965
+| Global Round : 2 | Local Epochs : 2 | 1464 images	Loss: 2.446889
+
+| Global Training Round 2 Summary |
+Local Train One global epoch loss_avg: 2.025965
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 58.4
+average row correct: ['44.4', '43.4', '66.9', '46.9', '47.9', '72.6', '74.5', '50.5', '25.2', '42.3', '45.9', '72.1', '17.9', '60.8', '81.0', '58.5', '47.8', '42.2', '43.0', '66.3']
+IoU: ['38.5', '31.9', '49.3', '32.7', '40.8', '46.6', '45.0', '41.9', '17.5', '24.5', '36.6', '33.5', '14.7', '34.6', '70.7', '37.9', '30.8', '29.6', '33.5', '51.3']
+mean IoU: 37.1
+
+Results after 3 global rounds of training:
+|---- Global Test Accuracy: 58.44%
+|---- Global Test IoU: 37.08%
+
+Total Run Time: 6.25min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 3 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 60.011852 | Test IoU: 38.633555 loss: 1.629529
+| Global Round : 3 | Local Epochs : 2 | 1464 images	Loss: 2.214842
+
+| Global Training Round 3 Summary |
+Local Train One global epoch loss_avg: 1.629529
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 60.0
+average row correct: ['41.9', '47.7', '65.5', '49.6', '51.7', '73.8', '75.5', '59.5', '25.5', '40.4', '44.9', '69.4', '22.9', '61.9', '81.5', '59.7', '52.4', '45.6', '45.2', '68.2']
+IoU: ['38.2', '33.8', '50.7', '33.4', '43.8', '48.2', '45.9', '46.7', '17.8', '25.1', '37.1', '34.8', '17.9', '36.0', '71.6', '39.8', '32.4', '30.9', '35.6', '53.3']
+mean IoU: 38.6
+
+Results after 4 global rounds of training:
+|---- Global Test Accuracy: 60.01%
+|---- Global Test IoU: 38.63%
+
+Total Run Time: 8.27min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 4 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 61.123830 | Test IoU: 39.848429 loss: 1.377539
+| Global Round : 4 | Local Epochs : 2 | 1464 images	Loss: 1.949765
+
+| Global Training Round 4 Summary |
+Local Train One global epoch loss_avg: 1.377539
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 61.1
+average row correct: ['42.3', '48.5', '63.7', '50.8', '55.1', '74.6', '74.5', '61.2', '26.0', '39.8', '43.7', '70.0', '26.6', '63.9', '82.7', '58.9', '54.5', '47.1', '49.1', '70.5']
+IoU: ['39.2', '35.0', '51.4', '34.2', '46.3', '49.7', '47.5', '47.9', '18.2', '25.5', '37.3', '35.6', '20.2', '37.5', '72.2', '41.4', '33.4', '31.6', '38.0', '54.9']
+mean IoU: 39.8
+
+Results after 5 global rounds of training:
+|---- Global Test Accuracy: 61.12%
+|---- Global Test IoU: 39.85%
+
+Total Run Time: 10.30min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 5 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 62.044114 | Test IoU: 40.830344 loss: 1.202618
+| Global Round : 5 | Local Epochs : 2 | 1464 images	Loss: 1.850445
+
+| Global Training Round 5 Summary |
+Local Train One global epoch loss_avg: 1.202618
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 62.0
+average row correct: ['42.1', '50.6', '63.2', '51.9', '57.3', '74.9', '74.1', '62.8', '26.5', '37.7', '44.3', '70.4', '30.1', '64.1', '83.6', '58.5', '57.0', '48.0', '53.1', '72.3']
+IoU: ['39.4', '36.5', '51.9', '34.6', '48.1', '51.0', '48.9', '48.9', '18.6', '25.4', '38.0', '36.3', '22.2', '39.0', '72.6', '42.4', '34.3', '32.1', '40.1', '56.4']
+mean IoU: 40.8
+
+Results after 6 global rounds of training:
+|---- Global Test Accuracy: 62.04%
+|---- Global Test IoU: 40.83%
+
+Total Run Time: 12.33min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 6 |
+local update
+
+User idx : 0
+iter 0 Test Accuracy: 62.705356 | Test IoU: 41.594163 loss: 1.070948
+| Global Round : 6 | Local Epochs : 2 | 1464 images	Loss: 1.681664
+
+| Global Training Round 6 Summary |
+Local Train One global epoch loss_avg: 1.070948
+
+Weight averaging
+using weighted_average_weights
+
+*******************************************
+Evaluate global model on global Test dataset
+global correct: 62.7
+average row correct: ['43.1', '51.7', '63.5', '53.3', '58.8', '75.4', '74.0', '63.5', '28.1', '37.4', '44.7', '71.0', '32.1', '65.2', '84.3', '59.3', '57.3', '47.5', '53.4', '73.9']
+IoU: ['40.4', '37.4', '52.5', '35.2', '49.6', '52.0', '50.0', '49.5', '19.3', '25.6', '38.5', '37.0', '23.4', '39.8', '73.0', '43.1', '34.8', '32.2', '40.9', '57.4']
+mean IoU: 41.6
+
+Results after 7 global rounds of training:
+|---- Global Test Accuracy: 62.71%
+|---- Global Test IoU: 41.59%
+
+Total Run Time: 14.38min
+*******************************************
+
+wandb not init
+
+
+| Global Training Round : 7 |
+local update
+
+User idx : 0
